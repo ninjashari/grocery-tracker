@@ -50,25 +50,29 @@ a household sees and edits the same items, bills and reports.
 
 ## How prices are compared
 
-Prices are entered **per unit** — what the shelf label says. The line total is
-`quantity × unit price`.
+The **line total** is what's entered and stored — it's what a receipt actually prints.
+Price per unit is derived from it (`total ÷ quantity`, rounded) purely for display and for
+prefilling your next purchase of the same item; it's never itself editable, since a
+receipt rarely prints a clean per-unit rate and dividing one back out can land on a paisa
+the total doesn't match (a 200 g pack at ₹109 flat has no exact per-gram price).
 
 Every line is also stored in a base unit (mass → g, volume → ml, count → pcs), which is
-what makes price history trustworthy: 1 kg at ₹60/kg and 500 g at ₹0.06/g are the same
-rate, so they land on the same curve. Price history is quoted per 100 g, per 100 ml or per
-piece.
+what makes price history trustworthy: 1 kg at ₹60 and 500 g at ₹30 are the same rate, so
+they land on the same curve. Price history is quoted per 100 g, per 100 ml or per piece.
 
 Money is stored as integer paise throughout — never as a float.
 
 ## CSV format
 
 ```
-bill_date, shop, payment_method, brand, item_name, category, quantity, unit, unit_price, line_total, note
+bill_date, shop, payment_method, brand, item_name, category, quantity, unit, unit_price, line_total, bill_total, note
 ```
 
 Required: `bill_date` (YYYY-MM-DD), `shop`, `item_name`, `quantity`, `unit`. Either
-`unit_price` or `line_total` must be present; if only the total is given, the unit price is
-derived from it. Rows sharing a date, shop and payment method become one bill.
+`line_total` or `unit_price` must be present; `line_total` is used as-is when given, and
+`unit_price` is only a fallback, multiplied out to a total. `bill_total` is the printed
+receipt total, repeated on every row of the same bill. Rows sharing a date, shop and
+payment method become one bill.
 
 Import always shows a preview first — how many bills and lines, which items, categories and
 shops are new, and which rows are invalid. Nothing is written until you confirm, and

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiRequestError, type Shop } from "../api.ts";
 import { Card, CardHead, ErrorBanner, Loading, Modal, PageHead } from "../components/ui.tsx";
 import { ItemCombo, type ItemChoice } from "../components/ItemCombo.tsx";
-import { formatPaise, lineTotalPaise, rupeesToPaise } from "@shared/money.ts";
+import { derivedUnitPricePaise, formatPaise, lineTotalPaise, rupeesToPaise } from "@shared/money.ts";
 import { UNITS, type Unit } from "@shared/units.ts";
 import { PAYMENT_METHODS, type PaymentMethod } from "@shared/schemas.ts";
 import type { Category, Item } from "@shared/types.ts";
@@ -21,7 +21,13 @@ type LineDraft = {
   search: string;
   quantity: string;
   unit: Unit;
-  unitPrice: string;
+  /** The line's total as printed on the receipt — what's actually entered and saved. */
+  lineTotal: string;
+  /**
+   * The picked item's last paid unit price, in paise. Used only to suggest a starting
+   * total once quantity is entered — never saved. Null for a brand-new item.
+   */
+  priceHintPaise: number | null;
 };
 
 let keyCounter = 0;
@@ -32,7 +38,8 @@ const emptyLine = (): LineDraft => ({
   search: "",
   quantity: "",
   unit: "pcs",
-  unitPrice: "",
+  lineTotal: "",
+  priceHintPaise: null,
 });
 
 const today = () => new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time.
@@ -123,7 +130,8 @@ export function BillEntry() {
             search: line.brand ? `${line.brand} ${line.itemName}` : line.itemName,
             quantity: String(line.quantity),
             unit: line.unit,
-            unitPrice: (line.unitPricePaise / 100).toFixed(2),
+            lineTotal: (line.lineTotalPaise / 100).toFixed(2),
+            priceHintPaise: line.unitPricePaise,
           })),
         );
       })
@@ -154,14 +162,26 @@ export function BillEntry() {
   function pick(key: string, choice: ItemChoice) {
     if (choice.kind === "existing") {
       const { item } = choice;
-      update(key, {
-        itemId: item.id,
-        newItem: null,
-        search: itemLabel(item),
-        unit: item.lastUnit ?? item.defaultUnit,
-        // Prefilling last paid price is what makes a repeat shop mostly Enter, Enter, Enter.
-        unitPrice: item.lastUnitPricePaise !== null ? (item.lastUnitPricePaise / 100).toFixed(2) : "",
-      });
+      setLines((current) =>
+        current.map((line) => {
+          if (line.key !== key) return line;
+          const patch: Partial<LineDraft> = {
+            itemId: item.id,
+            newItem: null,
+            search: itemLabel(item),
+            unit: item.lastUnit ?? item.defaultUnit,
+            priceHintPaise: item.lastUnitPricePaise,
+          };
+          // If a quantity is already typed, suggest a starting total from the last price
+          // paid — that's what makes a repeat shop mostly Enter, Enter, Enter. The user
+          // can always overwrite it with what the receipt actually says.
+          const quantity = Number(line.quantity);
+          if (line.lineTotal === "" && item.lastUnitPricePaise !== null && Number.isFinite(quantity) && quantity > 0) {
+            patch.lineTotal = (lineTotalPaise(quantity, item.lastUnitPricePaise) / 100).toFixed(2);
+          }
+          return { ...line, ...patch };
+        }),
+      );
     } else {
       setCreatingFor({ key, label: choice.label });
     }
@@ -174,6 +194,7 @@ export function BillEntry() {
       newItem: draft,
       search: draft.brand ? `${draft.brand} ${draft.name}` : draft.name,
       unit: draft.defaultUnit,
+      priceHintPaise: null,
     });
     setCreatingFor(null);
   }
@@ -183,10 +204,10 @@ export function BillEntry() {
     let ready = 0;
     for (const line of lines) {
       const quantity = Number(line.quantity);
-      const price = rupeesToPaise(line.unitPrice);
+      const totalPaise = rupeesToPaise(line.lineTotal);
       const hasItem = line.itemId !== null || line.newItem !== null;
-      if (hasItem && Number.isFinite(quantity) && quantity > 0 && price !== null) {
-        total += lineTotalPaise(quantity, price);
+      if (hasItem && Number.isFinite(quantity) && quantity > 0 && totalPaise !== null) {
+        total += totalPaise;
         ready += 1;
       }
     }
@@ -201,11 +222,11 @@ export function BillEntry() {
 
     for (const line of lines) {
       const quantity = Number(line.quantity);
-      const unitPricePaise = rupeesToPaise(line.unitPrice);
+      const lineTotalPaiseValue = rupeesToPaise(line.lineTotal);
       const hasItem = line.itemId !== null || line.newItem !== null;
 
       // Blank trailing rows are normal in a grid; skip them rather than erroring.
-      if (!hasItem && line.search.trim() === "" && line.quantity === "" && line.unitPrice === "") continue;
+      if (!hasItem && line.search.trim() === "" && line.quantity === "" && line.lineTotal === "") continue;
 
       if (!hasItem) {
         setError(`Pick or create an item for "${line.search || "the empty row"}"`);
@@ -215,15 +236,15 @@ export function BillEntry() {
         setError(`Enter a quantity greater than zero for "${line.search}"`);
         return null;
       }
-      if (unitPricePaise === null || unitPricePaise < 0) {
-        setError(`Enter a unit price for "${line.search}"`);
+      if (lineTotalPaiseValue === null || lineTotalPaiseValue < 0) {
+        setError(`Enter the line total for "${line.search}"`);
         return null;
       }
 
       payloadLines.push(
         line.itemId !== null
-          ? { itemId: line.itemId, quantity, unit: line.unit, unitPricePaise }
-          : { newItem: line.newItem!, quantity, unit: line.unit, unitPricePaise },
+          ? { itemId: line.itemId, quantity, unit: line.unit, lineTotalPaise: lineTotalPaiseValue }
+          : { newItem: line.newItem!, quantity, unit: line.unit, lineTotalPaise: lineTotalPaiseValue },
       );
     }
 
@@ -282,7 +303,7 @@ export function BillEntry() {
     <>
       <PageHead
         title={editingId !== null ? "Edit bill" : "New bill"}
-        subtitle="Enter what the receipt says. Line totals are worked out for you."
+        subtitle="Enter the total printed for each line. Price per unit is worked out for you."
       >
         {editingId !== null && (
           <button type="button" className="ghost" onClick={() => navigate("/bills")}>
@@ -369,18 +390,18 @@ export function BillEntry() {
                 <th className="col-item">Item</th>
                 <th className="col-qty num-cell">Qty</th>
                 <th className="col-unit">Unit</th>
-                <th className="col-price num-cell">Price / unit</th>
                 <th className="col-total num-cell">Line total</th>
+                <th className="col-price num-cell">Price / unit</th>
                 <th className="col-x" aria-label="Remove" />
               </tr>
             </thead>
             <tbody>
               {lines.map((line, index) => {
                 const quantity = Number(line.quantity);
-                const price = rupeesToPaise(line.unitPrice);
-                const total =
-                  Number.isFinite(quantity) && quantity > 0 && price !== null
-                    ? lineTotalPaise(quantity, price)
+                const totalPaise = rupeesToPaise(line.lineTotal);
+                const unitPricePaise =
+                  Number.isFinite(quantity) && quantity > 0 && totalPaise !== null
+                    ? derivedUnitPricePaise(totalPaise, quantity)
                     : null;
 
                 return (
@@ -403,7 +424,24 @@ export function BillEntry() {
                         className="num"
                         inputMode="decimal"
                         value={line.quantity}
-                        onChange={(event) => update(line.key, { quantity: event.target.value })}
+                        onChange={(event) => {
+                          const quantity = event.target.value;
+                          setLines((current) =>
+                            current.map((l) => {
+                              if (l.key !== line.key) return l;
+                              // Suggest a total from the last price paid, but only while
+                              // the total is still untouched — the receipt always wins.
+                              if (l.lineTotal !== "" || l.priceHintPaise === null) return { ...l, quantity };
+                              const parsedQuantity = Number(quantity);
+                              if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) return { ...l, quantity };
+                              return {
+                                ...l,
+                                quantity,
+                                lineTotal: (lineTotalPaise(parsedQuantity, l.priceHintPaise) / 100).toFixed(2),
+                              };
+                            }),
+                          );
+                        }}
                         aria-label="Quantity"
                       />
                     </td>
@@ -424,9 +462,9 @@ export function BillEntry() {
                       <input
                         className="num"
                         inputMode="decimal"
-                        value={line.unitPrice}
-                        onChange={(event) => update(line.key, { unitPrice: event.target.value })}
-                        aria-label="Price per unit"
+                        value={line.lineTotal}
+                        onChange={(event) => update(line.key, { lineTotal: event.target.value })}
+                        aria-label="Line total"
                         onKeyDown={(event) => {
                           if (event.key === "Enter" && index === lines.length - 1) {
                             event.preventDefault();
@@ -435,7 +473,9 @@ export function BillEntry() {
                         }}
                       />
                     </td>
-                    <td className="num-cell mono">{total === null ? <span className="faint">—</span> : formatPaise(total)}</td>
+                    <td className="num-cell mono faint">
+                      {unitPricePaise === null ? "—" : `${formatPaise(unitPricePaise)}/${line.unit}`}
+                    </td>
                     <td>
                       <button
                         type="button"

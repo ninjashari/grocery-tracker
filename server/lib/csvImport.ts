@@ -2,7 +2,7 @@ import { getDb, transaction } from "../db/connection.ts";
 import { badRequest } from "./http.ts";
 import { findOrCreateItem } from "./items.ts";
 import { parseCsvWithHeader } from "../../shared/csv.ts";
-import { rupeesToPaise, lineTotalPaise } from "../../shared/money.ts";
+import { derivedUnitPricePaise, lineTotalPaise, rupeesToPaise } from "../../shared/money.ts";
 import { isUnit, toBaseQuantity, type Unit } from "../../shared/units.ts";
 import { PAYMENT_METHODS, type PaymentMethod } from "../../shared/schemas.ts";
 import type { ImportPreview, ImportResult, ImportRowError } from "../../shared/types.ts";
@@ -13,7 +13,8 @@ type StagedLine = {
   categoryName: string;
   quantity: number;
   unit: Unit;
-  unitPricePaise: number;
+  /** The receipt's printed amount for this line — authoritative, stored as-is. */
+  lineTotalPaise: number;
 };
 
 type StagedBill = {
@@ -112,17 +113,18 @@ export function stageImport(householdId: number, csv: string): Staged {
       return;
     }
 
-    // unit_price is preferred; when only line_total is present, derive the unit price.
-    let unitPricePaise = rupeesToPaise(row["unit_price"] ?? "");
-    if (unitPricePaise === null) {
-      const total = rupeesToPaise(row["line_total"] ?? "");
-      if (total === null) {
-        fail("needs either unit_price or line_total");
+    // line_total is authoritative — it's what the receipt prints. unit_price is only a
+    // fallback for CSVs that never had a total, and gets multiplied back out to one.
+    let rowLineTotalPaise = rupeesToPaise(row["line_total"] ?? "");
+    if (rowLineTotalPaise === null) {
+      const unitPricePaise = rupeesToPaise(row["unit_price"] ?? "");
+      if (unitPricePaise === null) {
+        fail("needs either line_total or unit_price");
         return;
       }
-      unitPricePaise = Math.round(total / quantity);
+      rowLineTotalPaise = lineTotalPaise(quantity, unitPricePaise);
     }
-    if (unitPricePaise < 0) {
+    if (rowLineTotalPaise < 0) {
       fail("price cannot be negative");
       return;
     }
@@ -157,8 +159,8 @@ export function stageImport(householdId: number, csv: string): Staged {
       staged.bills.push(bill);
     }
 
-    bill.lines.push({ brand, itemName, categoryName, quantity, unit, unitPricePaise });
-    staged.totalPaise += lineTotalPaise(quantity, unitPricePaise);
+    bill.lines.push({ brand, itemName, categoryName, quantity, unit, lineTotalPaise: rowLineTotalPaise });
+    staged.totalPaise += rowLineTotalPaise;
   });
 
   return staged;
@@ -220,8 +222,8 @@ export function commitImport(householdId: number, userId: number, staged: Staged
        VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     );
     const insertLine = db.prepare(
-      `INSERT INTO bill_lines (bill_id, item_id, quantity, unit, unit_price_paise, base_quantity, base_unit)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO bill_lines (bill_id, item_id, quantity, unit, line_total_paise, unit_price_paise, base_quantity, base_unit)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const countItems = db.prepare("SELECT COUNT(*) AS n FROM items WHERE household_id = ?");
 
@@ -231,8 +233,7 @@ export function commitImport(householdId: number, userId: number, staged: Staged
       // Prefer the printed total the CSV carried; fall back to the line sum so an import
       // without a bill_total column still records something to check against.
       const statedTotal =
-        bill.statedTotalPaise ??
-        bill.lines.reduce((sum, line) => sum + lineTotalPaise(line.quantity, line.unitPricePaise), 0);
+        bill.statedTotalPaise ?? bill.lines.reduce((sum, line) => sum + line.lineTotalPaise, 0);
 
       const created = insertBill.get(
         householdId,
@@ -253,7 +254,17 @@ export function commitImport(householdId: number, userId: number, staged: Staged
           defaultUnit: line.unit,
         });
         const { baseQuantity, baseUnit } = toBaseQuantity(line.quantity, line.unit);
-        insertLine.run(created.id, itemId, line.quantity, line.unit, line.unitPricePaise, baseQuantity, baseUnit);
+        const unitPricePaise = derivedUnitPricePaise(line.lineTotalPaise, line.quantity);
+        insertLine.run(
+          created.id,
+          itemId,
+          line.quantity,
+          line.unit,
+          line.lineTotalPaise,
+          unitPricePaise,
+          baseQuantity,
+          baseUnit,
+        );
         result.linesCreated += 1;
       }
     }

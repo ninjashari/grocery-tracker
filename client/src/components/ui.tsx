@@ -1,4 +1,28 @@
 import type { ReactNode } from "react";
+import type { Theme } from "../theme.ts";
+
+export function ThemeToggle({
+  theme,
+  onToggle,
+  floating = false,
+}: {
+  theme: Theme;
+  onToggle: () => void;
+  floating?: boolean;
+}) {
+  const isDark = theme === "dark";
+  return (
+    <button
+      type="button"
+      className={`ghost theme-toggle${floating ? " floating" : ""}`}
+      onClick={onToggle}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      {isDark ? "☀️" : "🌙"}
+    </button>
+  );
+}
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <section className={`card ${className}`.trim()}>{children}</section>;

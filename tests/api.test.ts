@@ -112,8 +112,8 @@ describe("bills", () => {
       statedTotalPaise: R(192),
       note: "weekly",
       lines: [
-        { newItem: { brand: "Amul", name: "Milk", categoryId: dairy.id, defaultUnit: "L" }, quantity: 2, unit: "L", unitPricePaise: R(60) },
-        { newItem: { brand: "", name: "Tomato", categoryId: null, defaultUnit: "kg" }, quantity: 1.5, unit: "kg", unitPricePaise: R(48) },
+        { newItem: { brand: "Amul", name: "Milk", categoryId: dairy.id, defaultUnit: "L" }, quantity: 2, unit: "L", lineTotalPaise: R(120) },
+        { newItem: { brand: "", name: "Tomato", categoryId: null, defaultUnit: "kg" }, quantity: 1.5, unit: "kg", lineTotalPaise: R(72) },
       ],
     });
 
@@ -124,6 +124,37 @@ describe("bills", () => {
     // Base quantities are stored at write time; price history depends on them.
     expect(bill.data["lines"][0]).toMatchObject({ baseQuantity: 2000, baseUnit: "ml", lineTotalPaise: R(120) });
     expect(bill.data["lines"][1]).toMatchObject({ baseQuantity: 1500, baseUnit: "g", lineTotalPaise: R(72) });
+
+    // unitPricePaise is derived (total / quantity) for display, never itself stored input.
+    expect(bill.data["lines"][0]).toMatchObject({ unitPricePaise: R(60) });
+    expect(bill.data["lines"][1]).toMatchObject({ unitPricePaise: R(48) });
+  });
+
+  /**
+   * The bug this schema change fixes: a receipt's total rarely divides evenly by
+   * quantity, so a unit price rounded to the paisa and multiplied back out drifts from
+   * the printed total. The line total must be exactly what was entered, always — the
+   * derived unit price is free to not reproduce it.
+   */
+  it("keeps the line total exactly as entered, even when a rounded unit price can't reproduce it", async () => {
+    const call = client();
+    await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
+
+    // Rs 1.00 split three ways has no exact per-piece rate in whole paise.
+    const bill = await call("POST", "/api/bills", {
+      billDate: "2026-11-12",
+      shop: "Rounding Mart",
+      paymentMethod: "Cash",
+      lines: [
+        { newItem: { brand: "", name: "Odd Split Item", categoryId: null, defaultUnit: "pcs" }, quantity: 3, unit: "pcs", lineTotalPaise: 100 },
+      ],
+    });
+
+    const line = bill.data["lines"][0];
+    expect(line.lineTotalPaise).toBe(100);
+    expect(line.unitPricePaise).toBe(33); // round(100 / 3) — a derived display value
+    expect(3 * line.unitPricePaise).not.toBe(100); // doesn't reproduce the total — expected
+    expect(bill.data["computedTotalPaise"]).toBe(100); // the stored total still sums exactly
   });
 
   it("rolls the whole bill back when one line is invalid", async () => {
@@ -138,9 +169,9 @@ describe("bills", () => {
       shop: "DMart",
       paymentMethod: "Cash",
       lines: [
-        { newItem: { brand: "", name: "Should Not Exist", categoryId: null, defaultUnit: "pcs" }, quantity: 1, unit: "pcs", unitPricePaise: R(10) },
+        { newItem: { brand: "", name: "Should Not Exist", categoryId: null, defaultUnit: "pcs" }, quantity: 1, unit: "pcs", lineTotalPaise: R(10) },
         // 9_999_999 is not an item in this household, so the transaction must abort.
-        { itemId: 9_999_999, quantity: 1, unit: "pcs", unitPricePaise: R(10) },
+        { itemId: 9_999_999, quantity: 1, unit: "pcs", lineTotalPaise: R(10) },
       ],
     });
 
@@ -158,12 +189,12 @@ describe("bills", () => {
     const items = await call("GET", "/api/items?q=Milk");
     const milk = (items.data as { id: number }[])[0]!;
 
-    // Same rate as 2 L at Rs 60/L, expressed in millilitres.
+    // Same rate as 2 L for Rs 120 (Rs 6.00/100ml), expressed in millilitres: 500 ml for Rs 30.
     await call("POST", "/api/bills", {
       billDate: "2026-09-20",
       shop: "Local Kirana",
       paymentMethod: "Cash",
-      lines: [{ itemId: milk.id, quantity: 500, unit: "ml", unitPricePaise: R(0.06) }],
+      lines: [{ itemId: milk.id, quantity: 500, unit: "ml", lineTotalPaise: R(30) }],
     });
 
     const history = await call("GET", `/api/reports/price-history?itemId=${milk.id}`);
@@ -219,7 +250,7 @@ describe("household isolation", () => {
       billDate: "2026-09-08",
       shop: "Anywhere",
       paymentMethod: "Cash",
-      lines: [{ itemId: ownerItemId, quantity: 1, unit: "pcs", unitPricePaise: 100 }],
+      lines: [{ itemId: ownerItemId, quantity: 1, unit: "pcs", lineTotalPaise: 100 }],
     });
     expect(smuggled.status).toBe(404);
   });
@@ -305,15 +336,17 @@ describe("csv import", () => {
     const call = client();
     await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
 
-    // Lines sum to Rs 100.02 but the receipt said Rs 100.00.
+    // Lines sum to Rs 100.02 but the receipt said Rs 100.00 — plausible on a real bill
+    // (rounding across many lines), and exactly the kind of disagreement bill_total exists
+    // to preserve.
     const original = await call("POST", "/api/bills", {
       billDate: "2026-11-11",
       shop: "Rounding Mart",
       paymentMethod: "Card",
       statedTotalPaise: R(100),
       lines: [
-        { newItem: { brand: "", name: "Odd Weight Item", categoryId: null, defaultUnit: "kg" }, quantity: 0.795, unit: "kg", unitPricePaise: R(27) },
-        { newItem: { brand: "", name: "Round Item", categoryId: null, defaultUnit: "pcs" }, quantity: 1, unit: "pcs", unitPricePaise: R(78.55) },
+        { newItem: { brand: "", name: "Odd Weight Item", categoryId: null, defaultUnit: "kg" }, quantity: 0.795, unit: "kg", lineTotalPaise: R(21.47) },
+        { newItem: { brand: "", name: "Round Item", categoryId: null, defaultUnit: "pcs" }, quantity: 1, unit: "pcs", lineTotalPaise: R(78.55) },
       ],
     });
     expect(original.data["statedTotalPaise"]).toBe(R(100));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { basePricePaise, toBaseQuantity, UNITS, UNIT_DEFS, isUnit } from "../shared/units.ts";
-import { formatPaise, lineTotalPaise, paiseToRupees, rupeesToPaise } from "../shared/money.ts";
+import { derivedUnitPricePaise, formatPaise, lineTotalPaise, paiseToRupees, rupeesToPaise } from "../shared/money.ts";
 
 describe("unit conversion", () => {
   it("converts every unit to its base", () => {
@@ -74,17 +74,38 @@ describe("money", () => {
     expect(rupeesToPaise("8.115")).toBe(812);
   });
 
-  /**
-   * Must match `bill_lines.line_total_paise`, which SQLite computes as
-   * CAST(ROUND(quantity * unit_price_paise) AS INTEGER). Drift here would make the
-   * client's running total disagree with the stored bill.
-   */
-  it("rounds line totals the way the database does", () => {
+  it("multiplies a unit price out to a total, half-away-from-zero", () => {
     expect(lineTotalPaise(2, 6000)).toBe(12000);
     expect(lineTotalPaise(1.5, 3750)).toBe(5625);
     expect(lineTotalPaise(0.3, 3333)).toBe(1000); // 999.9 -> 1000
     expect(lineTotalPaise(150, 90)).toBe(13500); // 150 g at Rs 0.90/g
     expect(lineTotalPaise(0.5, 7)).toBe(4); // 3.5 rounds away from zero
+  });
+
+  /**
+   * `bill_lines.line_total_paise` is what's entered and stored; unit_price_paise is
+   * derived from it for display/prefill only. This must NOT be expected to reproduce the
+   * total when multiplied back by quantity — that's the whole reason the total, not the
+   * unit price, is authoritative.
+   */
+  describe("derivedUnitPricePaise", () => {
+    it("divides a total back to a per-unit price, rounded", () => {
+      expect(derivedUnitPricePaise(12000, 2)).toBe(6000);
+      expect(derivedUnitPricePaise(10900, 1)).toBe(10900); // a 1-piece pack: exact by construction
+    });
+
+    it("does not necessarily reproduce the original total when multiplied back out", () => {
+      // Rs 1.00 split three ways: 100 / 3 = 33.33 -> rounds to 33 paise/pc.
+      const derived = derivedUnitPricePaise(100, 3);
+      expect(derived).toBe(33);
+      expect(3 * derived).toBe(99); // not 100 — the stored total is what's authoritative
+    });
+
+    it("matches the real receipt case that motivated this: a 200g pack at Rs 109 flat", () => {
+      // No exact per-gram price exists in whole paise; the total is what was printed.
+      expect(derivedUnitPricePaise(10900, 200)).toBe(55); // 109 / 200 = 0.545 -> 54.5 -> 55
+      expect(200 * 55).not.toBe(10900);
+    });
   });
 
   it("formats paise in Indian digit grouping", () => {

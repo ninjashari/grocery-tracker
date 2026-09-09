@@ -68,6 +68,10 @@ export const itemUpdateSchema = z.object({
 /**
  * A line references an existing item by id, or carries a `newItem` payload so bill entry
  * never has to break flow to go create the item first. Exactly one of the two.
+ *
+ * `lineTotalPaise` is what's entered and stored — it's what a receipt actually prints.
+ * Unit price is derived from it server-side (line total / quantity, rounded) purely for
+ * display and prefill; it is never accepted as input, so it can't drift from the total.
  */
 export const billLineInputSchema = z
   .object({
@@ -75,7 +79,7 @@ export const billLineInputSchema = z
     newItem: itemCreateSchema.optional(),
     quantity: z.number().positive("Quantity must be greater than zero").max(1_000_000),
     unit: z.enum(UNITS),
-    unitPricePaise: paise,
+    lineTotalPaise: paise,
   })
   .refine((line) => (line.itemId == null) !== (line.newItem == null), {
     message: "Each line needs either an existing item or a new item, not both",

@@ -45,6 +45,50 @@
   }
 }
 
+/* The toggle in App.tsx stamps data-theme on <html>, which must win over the OS
+   preference above in either direction — hence the duplicated dark block here. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #101317;
+  --surface: #181c22;
+  --surface-2: #1f242b;
+  --border: #2b323a;
+  --border-strong: #3b444e;
+  --text: #e8ecf1;
+  --text-muted: #98a2b0;
+  --text-faint: #6f7987;
+  --accent: #4ba573;
+  --accent-soft: #16281f;
+  --accent-text: #08130d;
+  --warn: #e0b256;
+  --warn-soft: #2a2415;
+  --warn-border: #5c4c26;
+  --danger: #e07a7a;
+  --danger-soft: #2b1a1a;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 14px rgb(0 0 0 / 22%);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --border: #dfe3e8;
+  --border-strong: #c4cad2;
+  --text: #14181f;
+  --text-muted: #626b78;
+  --text-faint: #8b949f;
+  --accent: #1f6f43;
+  --accent-soft: #e5f2ea;
+  --accent-text: #ffffff;
+  --warn: #9a6207;
+  --warn-soft: #fdf3dd;
+  --warn-border: #e8c97a;
+  --danger: #ad2b2b;
+  --danger-soft: #fbeaea;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 4px 12px rgb(16 24 40 / 5%);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -180,6 +224,28 @@ a {
 .who span {
   font-size: 0.75rem;
   color: var(--text-faint);
+}
+
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.theme-toggle.floating {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 30;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
 }
 
 main {

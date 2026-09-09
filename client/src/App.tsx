@@ -1,6 +1,7 @@
 import { NavLink, Navigate, Route, Routes, Link } from "react-router-dom";
 import { useAuth } from "./auth.tsx";
-import { Loading } from "./components/ui.tsx";
+import { useTheme } from "./theme.ts";
+import { Loading, ThemeToggle } from "./components/ui.tsx";
 import { Login } from "./pages/Login.tsx";
 import { Dashboard } from "./pages/Dashboard.tsx";
 import { BillEntry } from "./pages/BillEntry.tsx";
@@ -22,9 +23,18 @@ const NAV = [
 
 export function App() {
   const { user, loading, logout } = useAuth();
+  const [theme, toggleTheme] = useTheme();
 
   if (loading) return <Loading label="Starting up…" />;
-  if (!user) return <Login />;
+
+  if (!user) {
+    return (
+      <>
+        <ThemeToggle theme={theme} onToggle={toggleTheme} floating />
+        <Login />
+      </>
+    );
+  }
 
   return (
     <div className="shell">
@@ -47,6 +57,7 @@ export function App() {
             <strong>{user.name}</strong>
             <span>{user.householdName}</span>
           </div>
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
           <button type="button" className="ghost small" onClick={() => void logout()}>
             Sign out
           </button>

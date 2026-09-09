@@ -2,6 +2,7 @@ import { getDb, transaction } from "../db/connection.ts";
 import { notFound } from "./http.ts";
 import { findOrCreateItem } from "./items.ts";
 import { toBaseQuantity } from "../../shared/units.ts";
+import { derivedUnitPricePaise } from "../../shared/money.ts";
 import type { BillInput } from "../../shared/schemas.ts";
 import type { Bill, BillLine, BillSummary } from "../../shared/types.ts";
 
@@ -135,8 +136,8 @@ export function saveBill(
     }
 
     const insertLine = db.prepare(
-      `INSERT INTO bill_lines (bill_id, item_id, quantity, unit, unit_price_paise, base_quantity, base_unit)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO bill_lines (bill_id, item_id, quantity, unit, line_total_paise, unit_price_paise, base_quantity, base_unit)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     for (const line of input.lines) {
@@ -146,7 +147,8 @@ export function saveBill(
           : findOrCreateItem(householdId, line.newItem!);
 
       const { baseQuantity, baseUnit } = toBaseQuantity(line.quantity, line.unit);
-      insertLine.run(id, itemId, line.quantity, line.unit, line.unitPricePaise, baseQuantity, baseUnit);
+      const unitPricePaise = derivedUnitPricePaise(line.lineTotalPaise, line.quantity);
+      insertLine.run(id, itemId, line.quantity, line.unit, line.lineTotalPaise, unitPricePaise, baseQuantity, baseUnit);
     }
 
     return id;

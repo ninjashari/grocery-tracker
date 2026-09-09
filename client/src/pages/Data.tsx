@@ -109,9 +109,9 @@ export function DataPage() {
             </summary>
             <p className="small mono" style={{ marginBottom: 0 }}>{CSV_COLUMNS.join(", ")}</p>
             <p className="small faint">
-              Required: bill_date (YYYY-MM-DD), shop, item_name, quantity, unit. Either unit_price or line_total
-              must be present — if only line_total is given, the unit price is derived. Units: kg, g, L, ml, pcs,
-              pack, dozen.
+              Required: bill_date (YYYY-MM-DD), shop, item_name, quantity, unit. Either line_total or unit_price
+              must be present — line_total is used as-is when given; unit_price is only a fallback, multiplied
+              out to a total. Units: kg, g, L, ml, pcs, pack, dozen.
             </p>
           </details>
         </div>
