@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Imports carry explicit .ts extensions so Node's native type stripping can resolve
+    // them at runtime without a build step. Nothing is emitted, so no rewriting is needed.
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+
+    "types": ["node", "vite/client"],
+    "paths": {
+      "@shared/*": ["./shared/*"]
+    }
+  },
+  "include": ["shared/**/*.ts", "server/**/*.ts", "client/**/*.ts", "client/**/*.tsx", "vite.config.ts"]
+}
