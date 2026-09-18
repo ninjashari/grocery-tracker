@@ -115,5 +115,27 @@ volume:
 docker build -t grocery-tracker . && docker run -p 5174:5174 -v grocery-data:/data grocery-tracker
 ```
 
-Set `SESSION_SECRET` and run behind TLS if you expose it beyond your own network; session
-cookies are marked `secure` when `NODE_ENV=production`.
+Run behind TLS if you expose it beyond your own network — session cookies are marked
+`secure` when `NODE_ENV=production`, so they won't be sent over plain HTTP at all.
+
+### Deploying on Render
+
+The fastest path is the included `render.yaml` Blueprint:
+
+1. Push this repo to GitHub (or GitLab).
+2. In the Render dashboard: **New → Blueprint**, pick the repo. Render reads
+   `render.yaml` and proposes a Docker web service named `grocery-tracker` with a 1 GB
+   persistent disk mounted at `/data`.
+3. Confirm and deploy. First build takes a few minutes (installs deps, builds the client,
+   builds the Docker image).
+4. Once live, open the `*.onrender.com` URL and sign up — that creates your household.
+
+**The persistent disk is not optional.** SQLite is a file, and Render's filesystem is
+wiped on every deploy and restart — without a disk mounted at `/data`, every deploy
+deletes your grocery history. Disks require a paid instance (the blueprint uses
+`starter`); Render's free tier can't attach one at all.
+
+To do it by hand instead of via Blueprint: **New → Web Service** → connect the repo →
+environment **Docker** → add a disk (`/data`, 1 GB+) → set env var `DATA_DIR=/data` →
+set **Health Check Path** to `/api/health`. `PORT` is injected by Render automatically;
+the app already reads `process.env.PORT`, so no change is needed there.

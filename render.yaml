@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: grocery-tracker
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter # disks require a paid plan; free instances can't attach one
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /data
+    disk:
+      name: grocery-data
+      mountPath: /data
+      sizeGB: 1
