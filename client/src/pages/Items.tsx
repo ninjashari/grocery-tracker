@@ -141,26 +141,33 @@ export function Items() {
               <tbody>
                 {items.map((item) => (
                   <tr key={item.id} style={item.archived ? { opacity: 0.6 } : undefined}>
-                    <td>
+                    <td className="cell-title">
                       <strong>{item.name}</strong>
                       {item.brand && <span className="faint"> · {item.brand}</span>}
                       {item.archived && <span className="pill" style={{ marginLeft: 8 }}>archived</span>}
                     </td>
-                    <td className="small muted">{item.categoryName ?? "Uncategorised"}</td>
-                    <td className="small muted">{item.defaultUnit}</td>
-                    <td className="num-cell mono">
+                    <td className="small muted" data-label="Category">
+                      {item.categoryName ?? "Uncategorised"}
+                    </td>
+                    <td className="small muted" data-label="Unit">
+                      {item.defaultUnit}
+                    </td>
+                    <td className="num-cell mono" data-label="Last price">
                       {item.lastUnitPricePaise === null ? (
                         <span className="faint">—</span>
                       ) : (
-                        <>
+                        // One wrapper so this cell is a single flex item on mobile.
+                        <div>
                           {formatPaise(item.lastUnitPricePaise)}
                           <span className="faint">/{item.lastUnit}</span>
                           <div className="small faint">{item.lastPurchasedOn}</div>
-                        </>
+                        </div>
                       )}
                     </td>
-                    <td className="num-cell">{item.purchaseCount}</td>
-                    <td>
+                    <td className="num-cell" data-label="Bought">
+                      {item.purchaseCount}
+                    </td>
+                    <td className="cell-actions">
                       <div className="button-row">
                         {item.purchaseCount > 1 && (
                           <Link to={`/reports?itemId=${item.id}`} className="small">

@@ -1,4 +1,5 @@
-import { NavLink, Navigate, Route, Routes, Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, Navigate, Route, Routes, Link, useLocation } from "react-router-dom";
 import { useAuth } from "./auth.tsx";
 import { useTheme } from "./theme.ts";
 import { Loading, ThemeToggle } from "./components/ui.tsx";
@@ -24,6 +25,32 @@ const NAV = [
 export function App() {
   const { user, loading, logout } = useAuth();
   const [theme, toggleTheme] = useTheme();
+  const [navOpen, setNavOpen] = useState(false);
+  const topbarRef = useRef<HTMLElement>(null);
+  const location = useLocation();
+
+  // Close the drawer whenever the route changes — NavLink clicks navigate but don't
+  // inherently dismiss it.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
+
+  // Close on a click/tap outside the topbar (mirrors ItemCombo.tsx's same pattern) and on Escape.
+  useEffect(() => {
+    if (!navOpen) return;
+    const onDocumentDown = (event: MouseEvent) => {
+      if (!topbarRef.current?.contains(event.target as Node)) setNavOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setNavOpen(false);
+    };
+    document.addEventListener("mousedown", onDocumentDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocumentDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [navOpen]);
 
   if (loading) return <Loading label="Starting up…" />;
 
@@ -38,13 +65,24 @@ export function App() {
 
   return (
     <div className="shell">
-      <header className="topbar">
+      <header className="topbar" ref={topbarRef}>
         <Link to="/" className="brand">
           <span className="brand-mark">₹</span>
           Grocery Tracker
         </Link>
 
-        <nav className="nav">
+        <button
+          type="button"
+          className="ghost nav-toggle"
+          aria-label={navOpen ? "Close menu" : "Open menu"}
+          aria-expanded={navOpen}
+          aria-controls="primary-nav"
+          onClick={() => setNavOpen((open) => !open)}
+        >
+          {navOpen ? "✕" : "☰"}
+        </button>
+
+        <nav id="primary-nav" className={navOpen ? "nav open" : "nav"}>
           {NAV.map((entry) => (
             <NavLink key={entry.to} to={entry.to} end={entry.end}>
               {entry.label}
@@ -63,6 +101,8 @@ export function App() {
           </button>
         </div>
       </header>
+
+      <div className={navOpen ? "nav-scrim open" : "nav-scrim"} aria-hidden="true" />
 
       <main>
         <Routes>

@@ -121,10 +121,12 @@ export function Settings() {
             <tbody>
               {categories.map((category, index) => (
                 <tr key={category.id}>
-                  <td>{category.name}</td>
-                  <td className="num-cell">{category.itemCount}</td>
-                  <td>
-                    <div className="button-row">
+                  <td className="cell-title">{category.name}</td>
+                  <td className="num-cell" data-label="Items">
+                    {category.itemCount}
+                  </td>
+                  <td className="cell-actions">
+                    <div className="reorder-group">
                       <button
                         type="button"
                         className="ghost small"
@@ -143,6 +145,8 @@ export function Settings() {
                       >
                         ↓
                       </button>
+                    </div>
+                    <div className="button-row">
                       <button type="button" className="ghost small" onClick={() => setRenaming(category)}>
                         Rename
                       </button>
@@ -176,12 +180,16 @@ export function Settings() {
             <tbody>
               {members.map((member) => (
                 <tr key={member.id}>
-                  <td>
+                  <td className="cell-title">
                     {member.name}
                     {member.id === user?.id && <span className="pill accent" style={{ marginLeft: 8 }}>you</span>}
                   </td>
-                  <td className="small muted">{member.email}</td>
-                  <td className="small faint mono">{member.createdAt.slice(0, 10)}</td>
+                  <td className="small muted" data-label="Email">
+                    {member.email}
+                  </td>
+                  <td className="small faint mono" data-label="Joined">
+                    {member.createdAt.slice(0, 10)}
+                  </td>
                 </tr>
               ))}
             </tbody>

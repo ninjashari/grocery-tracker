@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "../api.ts";
+import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead, Segmented } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
 import { BASE_PRICE_STEP } from "@shared/units.ts";
@@ -49,6 +50,9 @@ export function Reports() {
   const selectedItemId = searchParams.get("itemId") ?? "";
 
   const accent = useMemo(() => cssVar("--accent", "#1f6f43"), []);
+  // Narrow phones need the Y-axis to give up width, and shop-name-length axis labels to
+  // rotate even when there are only a few of them (the data-length check alone misses that).
+  const isPhone = useMediaQuery("(max-width: 640px)");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -147,8 +151,21 @@ export function Reports() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={spendData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tickLine={false} axisLine={false} interval={0} angle={spendData.length > 6 ? -25 : 0} textAnchor={spendData.length > 6 ? "end" : "middle"} height={spendData.length > 6 ? 60 : 30} />
-                    <YAxis tickLine={false} axisLine={false} width={70} tickFormatter={(value: number) => `₹${value.toLocaleString("en-IN")}`} />
+                    <XAxis
+                      dataKey="label"
+                      tickLine={false}
+                      axisLine={false}
+                      interval={0}
+                      angle={isPhone || spendData.length > 6 ? -25 : 0}
+                      textAnchor={isPhone || spendData.length > 6 ? "end" : "middle"}
+                      height={isPhone || spendData.length > 6 ? 60 : 30}
+                    />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      width={isPhone ? 44 : 70}
+                      tickFormatter={(value: number) => `₹${value.toLocaleString("en-IN")}`}
+                    />
                     <Tooltip
                       formatter={(value) => [formatPaise(Math.round(Number(value) * 100)), "Spend"]}
                       contentStyle={{
@@ -177,11 +194,17 @@ export function Reports() {
                   <tbody>
                     {spend!.buckets.map((bucket) => (
                       <tr key={bucket.key}>
-                        <td>{bucket.label}</td>
-                        <td className="num-cell">{bucket.billCount}</td>
-                        <td className="num-cell">{bucket.lineCount}</td>
-                        <td className="num-cell mono">{formatPaise(bucket.totalPaise)}</td>
-                        <td className="num-cell muted">
+                        <td className="cell-title">{bucket.label}</td>
+                        <td className="num-cell" data-label="Bills">
+                          {bucket.billCount}
+                        </td>
+                        <td className="num-cell" data-label="Lines">
+                          {bucket.lineCount}
+                        </td>
+                        <td className="num-cell mono" data-label="Spend">
+                          {formatPaise(bucket.totalPaise)}
+                        </td>
+                        <td className="num-cell muted" data-label="Share">
                           {spend!.totalPaise > 0
                             ? `${((bucket.totalPaise / spend!.totalPaise) * 100).toFixed(1)}%`
                             : "—"}
@@ -282,7 +305,7 @@ export function Reports() {
                     <YAxis
                       tickLine={false}
                       axisLine={false}
-                      width={70}
+                      width={isPhone ? 44 : 70}
                       domain={["auto", "auto"]}
                       tickFormatter={(value: number) => `₹${value.toFixed(2)}`}
                     />
@@ -329,21 +352,24 @@ export function Reports() {
                       const delta = previous ? point.basePricePaise - previous.basePricePaise : null;
                       return (
                         <tr key={`${point.billId}-${index}`}>
-                          <td className="mono small">{point.billDate}</td>
-                          <td>{point.shop}</td>
-                          <td className="num-cell mono">
+                          <td className="mono small cell-title">{point.billDate}</td>
+                          <td data-label="Shop">{point.shop}</td>
+                          <td className="num-cell mono" data-label="Bought">
                             {point.quantity} {point.unit}
                           </td>
-                          <td className="num-cell mono">
+                          <td className="num-cell mono" data-label="Paid / unit">
                             {formatPaise(point.unitPricePaise)}/{point.unit}
                           </td>
-                          <td className="num-cell mono">
-                            {formatPaise(Math.round(point.basePricePaise))}
-                            {delta !== null && delta !== 0 && (
-                              <span className={delta > 0 ? "up" : "down"} style={{ marginLeft: 6 }}>
-                                {delta > 0 ? "▲" : "▼"}
-                              </span>
-                            )}
+                          <td className="num-cell mono" data-label={`Price ${stepLabel}`}>
+                            {/* One wrapper so this cell is a single flex item on mobile. */}
+                            <div>
+                              {formatPaise(Math.round(point.basePricePaise))}
+                              {delta !== null && delta !== 0 && (
+                                <span className={delta > 0 ? "up" : "down"} style={{ marginLeft: 6 }}>
+                                  {delta > 0 ? "▲" : "▼"}
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -384,16 +410,22 @@ export function Reports() {
               <tbody>
                 {top.map((item) => (
                   <tr key={`${item.itemId}-${item.baseUnit}`}>
-                    <td>
+                    <td className="cell-title">
                       <strong>{item.itemName}</strong>
                       {item.brand && <span className="faint"> · {item.brand}</span>}
                     </td>
-                    <td className="small muted">{item.categoryName ?? "Uncategorised"}</td>
-                    <td className="num-cell">{item.purchaseCount}</td>
-                    <td className="num-cell mono">
+                    <td className="small muted" data-label="Category">
+                      {item.categoryName ?? "Uncategorised"}
+                    </td>
+                    <td className="num-cell" data-label="Times bought">
+                      {item.purchaseCount}
+                    </td>
+                    <td className="num-cell mono" data-label="Quantity">
                       {formatQuantity(item.totalBaseQuantity, item.baseUnit)}
                     </td>
-                    <td className="num-cell mono">{formatPaise(item.totalPaise)}</td>
+                    <td className="num-cell mono" data-label="Spend">
+                      {formatPaise(item.totalPaise)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

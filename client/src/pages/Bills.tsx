@@ -148,24 +148,33 @@ export function Bills() {
                             {detail ? "▾" : "▸"}
                           </button>
                         </td>
-                        <td className="mono small">{bill.billDate}</td>
-                        <td>
+                        <td className="mono small" data-label="Date">
+                          {bill.billDate}
+                        </td>
+                        <td className="cell-title">
                           <strong>{bill.shop}</strong>
                           {bill.note && <div className="small faint">{bill.note}</div>}
                         </td>
-                        <td>
+                        <td data-label="Paid with">
                           <span className="pill">{bill.paymentMethod}</span>
                         </td>
-                        <td className="num-cell">{bill.lineCount}</td>
-                        <td className="num-cell">
-                          {formatPaise(bill.computedTotalPaise)}
-                          {mismatch && (
-                            <div className="small" style={{ color: "var(--warn)" }}>
-                              receipt said {formatPaise(bill.statedTotalPaise!)}
-                            </div>
-                          )}
+                        <td className="num-cell" data-label="Items">
+                          {bill.lineCount}
                         </td>
-                        <td>
+                        <td className="num-cell" data-label="Total">
+                          {/* One wrapper so this cell is a single flex item on mobile —
+                              mixing bare text with an element child would otherwise split
+                              into two items and misbehave under justify-content:space-between. */}
+                          <div>
+                            {formatPaise(bill.computedTotalPaise)}
+                            {mismatch && (
+                              <div className="small" style={{ color: "var(--warn)" }}>
+                                receipt said {formatPaise(bill.statedTotalPaise!)}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="cell-actions">
                           <div className="button-row">
                             <button
                               type="button"
@@ -184,34 +193,42 @@ export function Bills() {
                       {detail && (
                         <tr>
                           <td />
-                          <td colSpan={6} style={{ padding: 0, background: "var(--surface-2)" }}>
-                            <table>
-                              <thead>
-                                <tr>
-                                  <th>Item</th>
-                                  <th>Category</th>
-                                  <th className="num-cell">Qty</th>
-                                  <th className="num-cell">Price / unit</th>
-                                  <th className="num-cell">Line total</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {detail.lines.map((line) => (
-                                  <tr key={line.id}>
-                                    <td>
-                                      {line.brand && <span className="faint">{line.brand} </span>}
-                                      {line.itemName}
-                                    </td>
-                                    <td className="small muted">{line.categoryName ?? "Uncategorised"}</td>
-                                    <td className="num-cell mono">
-                                      {line.quantity} {line.unit}
-                                    </td>
-                                    <td className="num-cell mono">{formatPaise(line.unitPricePaise)}</td>
-                                    <td className="num-cell mono">{formatPaise(line.lineTotalPaise)}</td>
+                          <td colSpan={6} className="detail-cell">
+                            <div className="table-wrap">
+                              <table>
+                                <thead>
+                                  <tr>
+                                    <th>Item</th>
+                                    <th>Category</th>
+                                    <th className="num-cell">Qty</th>
+                                    <th className="num-cell">Price / unit</th>
+                                    <th className="num-cell">Line total</th>
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody>
+                                  {detail.lines.map((line) => (
+                                    <tr key={line.id}>
+                                      <td className="cell-title">
+                                        {line.brand && <span className="faint">{line.brand} </span>}
+                                        {line.itemName}
+                                      </td>
+                                      <td className="small muted" data-label="Category">
+                                        {line.categoryName ?? "Uncategorised"}
+                                      </td>
+                                      <td className="num-cell mono" data-label="Qty">
+                                        {line.quantity} {line.unit}
+                                      </td>
+                                      <td className="num-cell mono" data-label="Price / unit">
+                                        {formatPaise(line.unitPricePaise)}
+                                      </td>
+                                      <td className="num-cell mono" data-label="Line total">
+                                        {formatPaise(line.lineTotalPaise)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </td>
                         </tr>
                       )}

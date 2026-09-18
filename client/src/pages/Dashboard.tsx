@@ -103,7 +103,7 @@ export function Dashboard() {
                 <tbody>
                   {recent.map((bill) => (
                     <tr key={bill.id}>
-                      <td>
+                      <td className="cell-title">
                         <strong>{bill.shop}</strong>
                         <div className="small faint">
                           {bill.billDate} · {bill.lineCount} item{bill.lineCount === 1 ? "" : "s"} ·{" "}
@@ -133,7 +133,7 @@ export function Dashboard() {
                 <tbody>
                   {top.map((item) => (
                     <tr key={`${item.itemId}-${item.baseUnit}`}>
-                      <td>
+                      <td className="cell-title">
                         <strong>{item.itemName}</strong>
                         {item.brand && <span className="faint"> · {item.brand}</span>}
                         <div className="small faint">

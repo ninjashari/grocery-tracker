@@ -383,43 +383,49 @@ export function BillEntry() {
           <span className="small faint">Enter on an empty item field adds a row</span>
         </CardHead>
 
-        <div className="card-body tight table-wrap">
-          <table className="lines-table">
-            <thead>
-              <tr>
-                <th className="col-item">Item</th>
-                <th className="col-qty num-cell">Qty</th>
-                <th className="col-unit">Unit</th>
-                <th className="col-total num-cell">Line total</th>
-                <th className="col-price num-cell">Price / unit</th>
-                <th className="col-x" aria-label="Remove" />
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((line, index) => {
-                const quantity = Number(line.quantity);
-                const totalPaise = rupeesToPaise(line.lineTotal);
-                const unitPricePaise =
-                  Number.isFinite(quantity) && quantity > 0 && totalPaise !== null
-                    ? derivedUnitPricePaise(totalPaise, quantity)
-                    : null;
+        <div className="card-body tight">
+          {/* A data-entry grid, not read-only data — div-based (not a <table>) so the
+              mobile layout can restructure quantity+unit onto one line and stack the
+              rest, instead of just shrinking table columns until they're unreadable.
+              See .lines-grid / .line-row in styles.css. */}
+          <div className="lines-grid" role="table" aria-label="Bill line items">
+            <div className="lines-head" role="row">
+              <span role="columnheader">Item</span>
+              <span role="columnheader" className="num-cell">Qty</span>
+              <span role="columnheader">Unit</span>
+              <span role="columnheader" className="num-cell">Line total</span>
+              <span role="columnheader" className="num-cell">Price / unit</span>
+              <span role="columnheader" aria-label="Remove" />
+            </div>
 
-                return (
-                  <tr key={line.key}>
-                    <td>
-                      <ItemCombo
-                        ref={(node) => registerItemRef(line.key, node)}
-                        items={items}
-                        value={line.search}
-                        onValueChange={(value) =>
-                          // Typing after a pick clears the link, so a stale item can't be saved.
-                          update(line.key, { search: value, itemId: null, newItem: null })
-                        }
-                        onPick={(choice) => pick(line.key, choice)}
-                        onEnterEmpty={index === lines.length - 1 ? addLine : undefined}
-                      />
-                    </td>
-                    <td>
+            {lines.map((line, index) => {
+              const quantity = Number(line.quantity);
+              const totalPaise = rupeesToPaise(line.lineTotal);
+              const unitPricePaise =
+                Number.isFinite(quantity) && quantity > 0 && totalPaise !== null
+                  ? derivedUnitPricePaise(totalPaise, quantity)
+                  : null;
+
+              return (
+                <div className="line-row" role="row" key={line.key}>
+                  <div className="line-cell col-item" role="cell">
+                    <span className="mobile-label">Item</span>
+                    <ItemCombo
+                      ref={(node) => registerItemRef(line.key, node)}
+                      items={items}
+                      value={line.search}
+                      onValueChange={(value) =>
+                        // Typing after a pick clears the link, so a stale item can't be saved.
+                        update(line.key, { search: value, itemId: null, newItem: null })
+                      }
+                      onPick={(choice) => pick(line.key, choice)}
+                      onEnterEmpty={index === lines.length - 1 ? addLine : undefined}
+                    />
+                  </div>
+
+                  <div className="qty-unit-pair">
+                    <div className="line-cell col-qty" role="cell">
+                      <span className="mobile-label">Qty</span>
                       <input
                         className="num"
                         inputMode="decimal"
@@ -444,8 +450,9 @@ export function BillEntry() {
                         }}
                         aria-label="Quantity"
                       />
-                    </td>
-                    <td>
+                    </div>
+                    <div className="line-cell col-unit" role="cell">
+                      <span className="mobile-label">Unit</span>
                       <select
                         value={line.unit}
                         onChange={(event) => update(line.key, { unit: event.target.value as Unit })}
@@ -457,41 +464,45 @@ export function BillEntry() {
                           </option>
                         ))}
                       </select>
-                    </td>
-                    <td>
-                      <input
-                        className="num"
-                        inputMode="decimal"
-                        value={line.lineTotal}
-                        onChange={(event) => update(line.key, { lineTotal: event.target.value })}
-                        aria-label="Line total"
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" && index === lines.length - 1) {
-                            event.preventDefault();
-                            addLine();
-                          }
-                        }}
-                      />
-                    </td>
-                    <td className="num-cell mono faint">
-                      {unitPricePaise === null ? "—" : `${formatPaise(unitPricePaise)}/${line.unit}`}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="ghost small"
-                        onClick={() => removeLine(line.key)}
-                        aria-label="Remove line"
-                        title="Remove line"
-                      >
-                        ✕
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    </div>
+                  </div>
+
+                  <div className="line-cell col-total" role="cell">
+                    <span className="mobile-label">Line total</span>
+                    <input
+                      className="num"
+                      inputMode="decimal"
+                      value={line.lineTotal}
+                      onChange={(event) => update(line.key, { lineTotal: event.target.value })}
+                      aria-label="Line total"
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && index === lines.length - 1) {
+                          event.preventDefault();
+                          addLine();
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="line-cell col-price num-cell mono faint" role="cell">
+                    {unitPricePaise === null ? "—" : `${formatPaise(unitPricePaise)}/${line.unit}`}
+                  </div>
+
+                  <div className="line-cell col-x" role="cell">
+                    <button
+                      type="button"
+                      className="ghost small line-remove"
+                      onClick={() => removeLine(line.key)}
+                      aria-label="Remove line"
+                      title="Remove line"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="card-body" style={{ paddingTop: 0 }}>

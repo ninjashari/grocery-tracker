@@ -203,6 +203,22 @@ a {
   color: var(--accent);
 }
 
+/* Hamburger toggle + dimming scrim for the collapsed nav drawer — inert above the nav
+   breakpoint, see the @media (max-width: 768px) block at the end of this file. */
+.nav-toggle {
+  display: none;
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.nav-scrim {
+  display: none;
+}
+
 .topbar-right {
   display: flex;
   align-items: center;
@@ -473,6 +489,14 @@ button.small {
   align-items: center;
 }
 
+/* Groups a row's reorder (up/down) buttons apart from its other actions, so a card's
+   action footer on mobile reads as (reorder) <-> (rename / delete) rather than four
+   undifferentiated buttons. Harmless at desktop widths — just a tighter gap. */
+.reorder-group {
+  display: flex;
+  gap: 0.3rem;
+}
+
 .segmented {
   display: inline-flex;
   padding: 2px;
@@ -539,6 +563,14 @@ tbody tr:last-child td {
 }
 
 .row-hover tbody tr:hover {
+  background: var(--surface-2);
+}
+
+/* Wraps the nested bill-detail sub-table (Bills.tsx) — tinted to read as an inset panel
+   at every width; the mobile media query below only changes it from padding:0 to a
+   block layout with breathing room once its rows have become cards. */
+.detail-cell {
+  padding: 0;
   background: var(--surface-2);
 }
 
@@ -652,38 +684,72 @@ tbody tr:last-child td {
 
 /* ------------------------------ bill entry -------------------------------- */
 
-.lines-table td {
-  padding: 0.35rem 0.4rem;
+/* A data-entry grid, not read-only data, so it's div-based (role="table"/"row"/"cell")
+   rather than a real <table> — that's what lets the mobile layout below restructure
+   quantity+unit onto one line and the item field onto its own, instead of just shrinking
+   table columns until they're unreadable. Desktop mirrors the original 6-column table
+   exactly via CSS grid; .qty-unit-pair uses display:contents here so its two children
+   still act as direct grid items, only becoming a visual pairing on mobile. */
+.lines-grid {
+  display: flex;
+  flex-direction: column;
 }
 
-.lines-table input,
-.lines-table select {
+.lines-head,
+.line-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 92px 90px 110px 110px 36px;
+  align-items: center;
+}
+
+.lines-head {
+  padding: 0.6rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.lines-head > span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  font-weight: 650;
+}
+
+.line-row {
+  border-bottom: 1px solid var(--border);
+}
+
+.line-row:last-child {
+  border-bottom: none;
+}
+
+.line-cell {
+  padding: 0.35rem 0.4rem;
+  min-width: 0;
+}
+
+.lines-grid .num-cell {
+  text-align: right;
+}
+
+.lines-grid input,
+.lines-grid select {
   padding: 0.4rem 0.45rem;
 }
 
-.lines-table .col-item {
-  min-width: 220px;
-  width: 40%;
+.qty-unit-pair {
+  display: contents;
 }
 
-.lines-table .col-qty {
-  width: 92px;
+.line-remove {
+  display: grid;
+  place-items: center;
 }
 
-.lines-table .col-unit {
-  width: 90px;
-}
-
-.lines-table .col-price {
-  width: 110px;
-}
-
-.lines-table .col-total {
-  width: 110px;
-}
-
-.lines-table .col-x {
-  width: 36px;
+/* Hidden on desktop — inputs already carry aria-labels there; these are the visual
+   equivalent once the mobile layout below stops showing column headers. */
+.mobile-label {
+  display: none;
 }
 
 .combo {
@@ -725,10 +791,20 @@ tbody tr:last-child td {
   background: var(--accent-soft);
 }
 
+/* The item name truncates before the price hint does — the hint is short and worth
+   keeping fully visible; the name is the one likely to overflow on a narrow card. */
+.combo-option > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .combo-option .opt-sub {
   font-size: 0.78rem;
   color: var(--text-faint);
   font-weight: 450;
+  flex-shrink: 0;
 }
 
 .combo-option.create {
@@ -787,19 +863,274 @@ tbody tr:last-child td {
   stroke: var(--border);
 }
 
-@media (max-width: 700px) {
-  .topbar {
-    flex-wrap: wrap;
-    gap: 0.6rem 1rem;
+/* ============================================================================
+   Nav breakpoint — below this, the 7-item nav can't fit alongside the brand and
+   account controls, so it collapses behind a hamburger + dropdown drawer. Also
+   covers tablet-portrait widths (768–834px), where the same crowding applies.
+   ========================================================================= */
+@media (max-width: 768px) {
+  .nav-toggle {
+    display: grid;
+    place-items: center;
   }
 
   .nav {
-    order: 3;
-    width: 100%;
-    flex: 1 0 100%;
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.5rem;
+    max-height: calc(100vh - 100%);
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow);
+  }
+
+  .nav.open {
+    display: flex;
+  }
+
+  .nav-scrim.open {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    background: rgb(9 12 16 / 40%);
+  }
+
+  /* Touch targets — 44px is the standard iOS/Android minimum. Scoped to this
+     breakpoint only, so desktop keeps its tighter, mouse-oriented density. */
+  button.small {
+    padding: 0.6rem 0.8rem;
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .theme-toggle {
+    width: 44px;
+    height: 44px;
+  }
+
+  .nav a {
+    min-height: 44px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+  }
+
+  input,
+  select,
+  textarea {
+    padding: 0.75rem 0.7rem;
+    min-height: 44px;
+  }
+}
+
+/* ============================================================================
+   Layout breakpoint — real phones (360–430px real-device widths, with margin).
+   Tables restructure into cards, forms stack to one column, modals become
+   bottom sheets, charts shrink. 640–768px deliberately keeps desktop-ish
+   layout here (just the collapsed nav from above) since there's still room.
+   ========================================================================= */
+@media (max-width: 640px) {
+  /* .topbar's existing position:sticky already establishes the containing block .nav's
+     absolute positioning needs (any position other than static does) — no override here. */
+  .who {
+    display: none;
   }
 
   main {
     padding: 1rem 0.85rem 3rem;
+  }
+
+  /* ---- forms: predictable single-column stacking instead of flex-wrap math --- */
+  .form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-row > * {
+    width: 100%;
+  }
+
+  .form-row > .shrink {
+    flex: 1 1 auto;
+  }
+
+  /* ---- bill-entry grid becomes stacked cards, one per line item ---- */
+  .lines-head {
+    display: none;
+  }
+
+  .line-row {
+    display: block;
+    position: relative;
+    padding: 0.75rem;
+    padding-right: 3.5rem;
+    margin-bottom: 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+  }
+
+  .line-row:last-child {
+    margin-bottom: 0;
+  }
+
+  .line-cell {
+    padding: 0 0 0.6rem;
+  }
+
+  .line-cell:last-child {
+    padding-bottom: 0;
+  }
+
+  .lines-grid .num-cell {
+    text-align: left;
+  }
+
+  .lines-grid input,
+  .lines-grid select {
+    padding: 0.65rem 0.6rem;
+    min-height: 44px;
+  }
+
+  .qty-unit-pair {
+    display: flex;
+    gap: 0.5rem;
+    padding-bottom: 0.6rem;
+  }
+
+  .qty-unit-pair .line-cell {
+    flex: 1;
+    padding-bottom: 0;
+  }
+
+  .line-cell.col-price {
+    padding-bottom: 0;
+    color: var(--text-faint);
+    font-size: 0.85rem;
+  }
+
+  .line-remove {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+  }
+
+  .mobile-label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-faint);
+    font-weight: 650;
+    margin-bottom: 0.2rem;
+  }
+
+  /* ---- every other table: rows become cards via data-label attributes ---- */
+  .table-wrap table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .table-wrap table tr {
+    display: block;
+    margin-bottom: 0.6rem;
+    padding: 0.6rem 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .table-wrap table tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .table-wrap table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 0.3rem 0;
+    border-bottom: none;
+    text-align: right;
+    white-space: normal;
+  }
+
+  /* A num-cell with no data-label (Dashboard's minimal tables) has only one flex item,
+     and space-between doesn't right-align a lone item — force it explicitly instead. */
+  .table-wrap table td.num-cell:not([data-label]) {
+    justify-content: flex-end;
+  }
+
+  .table-wrap table td[data-label]::before {
+    content: attr(data-label);
+    text-align: left;
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-faint);
+    font-weight: 650;
+  }
+
+  .table-wrap table td.cell-title {
+    display: block;
+    text-align: left;
+    font-weight: 600;
+    font-size: 1rem;
+    padding-top: 0;
+  }
+
+  .table-wrap table td.cell-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    text-align: left;
+    padding-top: 0.6rem;
+    margin-top: 0.3rem;
+    border-top: 1px solid var(--border);
+  }
+
+  /* The nested bill-detail sub-table lives inside a colSpan cell holding a whole
+     other table, not a value — it must not be flexed like a label/value cell. */
+  .table-wrap table td.detail-cell {
+    display: block;
+    padding: 0.5rem;
+  }
+
+  /* ---- modals become full-width bottom sheets ---- */
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal {
+    max-width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* ---- charts: shorter, narrower axis, smaller ticks ---- */
+  .chart-wrap {
+    height: 220px;
+  }
+
+  .recharts-cartesian-axis-tick text {
+    font-size: 10px;
   }
 }
