@@ -16,8 +16,10 @@ Currency is INR (₹) and units are metric: kg, g, L, ml, pcs, pack, dozen.
 ## Requirements
 
 Node **24 or newer**. The server runs TypeScript directly through Node's native type
-stripping and stores data with the built-in `node:sqlite` module, so there is no build step
-for the server and no native modules to compile.
+stripping, so there is no build step for the server itself (only the client goes through
+`vite build`). Data is stored via [Turso](https://turso.tech) (libSQL) — see
+[Data and deployment](#data-and-deployment) below; local development needs no account or
+network access at all.
 
 ## Running it
 
@@ -33,7 +35,8 @@ That starts the API on `http://localhost:5174` and the Vite dev server on
 `http://localhost:5173`. Open the second one. Both bind to all interfaces, so the app is
 reachable from a phone on the same wifi at `http://<your-machine-ip>:5173`.
 
-Copy `.env.example` to `.env` to change the port or the data directory.
+Copy `.env.example` to `.env` to change the port or point at a real Turso database
+instead of the local file.
 
 For a single-process production run, build the client first — the server then serves it
 from the same origin:
@@ -84,7 +87,7 @@ re-imported without creating duplicates.
 ```
 shared/     units, money, CSV and zod schemas — used by both server and client
 server/     Express API; routes/ per resource, lib/ for the logic they share
-  db/       connection, migrations (applied at boot), category seed
+  db/       Drizzle ORM: connection, schema.ts (source of truth), category seed
 client/     React app; pages/ per screen, components/ for shared UI
 tests/      vitest — unit tests for shared/, integration tests against the real API
 ```
@@ -103,39 +106,36 @@ npm run typecheck
 
 ## Data and deployment
 
-The database is a single SQLite file at `data/grocery.db` (override with `DATA_DIR` or
-`DB_PATH`). Back it up by copying that file. Schema changes go in
-`server/db/migrations/` as new numbered `.sql` files, applied in filename order at
-startup — never rename one that has already run.
+Data is stored via **Turso** (libSQL — a SQLite-compatible, network-hosted database with
+a durable free tier). Locally, with no `TURSO_DATABASE_URL` set, the app falls back to a
+plain embedded file at `data/grocery.db` — no account, no network, `npm install && npm
+run dev` just works. Only a deployed instance needs real Turso credentials.
 
-The included `Dockerfile` runs the same single process and keeps the database in a `/data`
-volume:
-
-```bash
-docker build -t grocery-tracker . && docker run -p 5174:5174 -v grocery-data:/data grocery-tracker
-```
+This matters specifically because of where this app is meant to run: Render's free tier
+has **no persistent disk** — every deploy and restart wipes the container filesystem, so
+a locally-stored SQLite file would lose all its data on the next deploy. A network
+database sidesteps that entirely.
 
 Run behind TLS if you expose it beyond your own network — session cookies are marked
 `secure` when `NODE_ENV=production`, so they won't be sent over plain HTTP at all.
 
 ### Deploying on Render
 
-The fastest path is the included `render.yaml` Blueprint:
+This deploys as a plain Node web service (no Docker) — either via the included
+`render.yaml` Blueprint or by hand:
 
-1. Push this repo to GitHub (or GitLab).
-2. In the Render dashboard: **New → Blueprint**, pick the repo. Render reads
-   `render.yaml` and proposes a Docker web service named `grocery-tracker` with a 1 GB
-   persistent disk mounted at `/data`.
-3. Confirm and deploy. First build takes a few minutes (installs deps, builds the client,
-   builds the Docker image).
-4. Once live, open the `*.onrender.com` URL and sign up — that creates your household.
-
-**The persistent disk is not optional.** SQLite is a file, and Render's filesystem is
-wiped on every deploy and restart — without a disk mounted at `/data`, every deploy
-deletes your grocery history. Disks require a paid instance (the blueprint uses
-`starter`); Render's free tier can't attach one at all.
-
-To do it by hand instead of via Blueprint: **New → Web Service** → connect the repo →
-environment **Docker** → add a disk (`/data`, 1 GB+) → set env var `DATA_DIR=/data` →
-set **Health Check Path** to `/api/health`. `PORT` is injected by Render automatically;
-the app already reads `process.env.PORT`, so no change is needed there.
+1. Create a [Turso](https://turso.tech) account and database, and note its connection
+   URL (`libsql://<name>-<org>.turso.io`) and an auth token for it.
+2. Push this repo to GitHub (or GitLab).
+3. **Blueprint path**: Render dashboard → **New → Blueprint**, pick the repo. Render
+   reads `render.yaml` and proposes a free-tier Node web service. Confirm, then set
+   `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in the service's **Environment** tab (the
+   Blueprint marks them `sync: false` deliberately, so they're never committed to the
+   repo — you set them once in the dashboard).
+   **Manual path**: **New → Web Service** → connect the repo → environment **Node** →
+   Build Command `npm install && npm run build` → Start Command `npm start` → set
+   `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` → Health Check Path `/api/health`. `PORT` is
+   injected by Render automatically.
+4. Deploy, then open the `*.onrender.com` URL and sign up — that creates your household.
+5. Confirm persistence actually works: add a bill, trigger a redeploy (push a commit, or
+   redeploy manually from the dashboard), and check the bill survived.

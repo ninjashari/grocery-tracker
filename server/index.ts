@@ -1,10 +1,11 @@
 import express from "express";
 import cookieParser from "cookie-parser";
+import { sql } from "drizzle-orm";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { getDb, resolveDbPath } from "./db/connection.ts";
+import { getDb } from "./db/connection.ts";
 import { errorHandler, notFound } from "./lib/http.ts";
 import { loadAuth, requireAuth } from "./middleware/auth.ts";
 import { authRouter } from "./routes/auth.ts";
@@ -27,8 +28,9 @@ export function createApp() {
   app.use(cookieParser());
   app.use(loadAuth);
 
-  app.get("/api/health", (_req, res) => {
-    res.json({ ok: true, db: resolveDbPath() });
+  app.get("/api/health", async (_req, res) => {
+    await getDb().get(sql`SELECT 1`);
+    res.json({ ok: true });
   });
 
   app.use("/api/auth", authRouter);
@@ -57,8 +59,8 @@ const isMain = process.argv[1] && import.meta.url === `file://${resolve(process.
 
 if (isMain) {
   const port = Number(process.env.PORT ?? 5174);
-  getDb(); // Run migrations before accepting traffic.
+  getDb();
   createApp().listen(port, "0.0.0.0", () => {
-    console.log(`Grocery tracker API on http://localhost:${port} (db: ${resolveDbPath()})`);
+    console.log(`Grocery tracker API on http://localhost:${port}`);
   });
 }

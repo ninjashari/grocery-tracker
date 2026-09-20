@@ -1,13 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { pushSQLiteSchema } from "drizzle-kit/api";
 import type { Server } from "node:http";
 
-// Point the singleton connection at a throwaway file before anything imports it.
-const dir = mkdtempSync(join(tmpdir(), "grocery-test-"));
-process.env["DB_PATH"] = join(dir, "test.db");
+// Point the singleton connection at a throwaway in-memory database before anything imports it.
+process.env["TURSO_DATABASE_URL"] = "file::memory:";
 
+const schema = await import("../server/db/schema.ts");
+const { getDb } = await import("../server/db/connection.ts");
 const { createApp } = await import("../server/index.ts");
 
 let server: Server;
@@ -43,6 +42,9 @@ function client() {
 }
 
 beforeAll(async () => {
+  const { apply } = await pushSQLiteSchema(schema, getDb());
+  await apply();
+
   server = createApp().listen(0);
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
@@ -52,7 +54,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  rmSync(dir, { recursive: true, force: true });
 });
 
 const R = (rupees: number) => Math.round(rupees * 100);

@@ -1,4 +1,6 @@
-import { getDb, transaction } from "../db/connection.ts";
+import { and, eq, sql } from "drizzle-orm";
+import type { DB, Executor } from "../db/connection.ts";
+import { bills, billLines, categories, items } from "../db/schema.ts";
 import { badRequest } from "./http.ts";
 import { findOrCreateItem } from "./items.ts";
 import { parseCsvWithHeader } from "../../shared/csv.ts";
@@ -13,7 +15,6 @@ type StagedLine = {
   categoryName: string;
   quantity: number;
   unit: Unit;
-  /** The receipt's printed amount for this line — authoritative, stored as-is. */
   lineTotalPaise: number;
 };
 
@@ -22,7 +23,6 @@ type StagedBill = {
   shop: string;
   paymentMethod: PaymentMethod;
   note: string;
-  /** The printed receipt total, when the CSV carries one. Null falls back to the line sum. */
   statedTotalPaise: number | null;
   lines: StagedLine[];
 };
@@ -39,12 +39,47 @@ type Staged = {
 const REQUIRED_HEADERS = ["bill_date", "shop", "item_name", "quantity", "unit"] as const;
 
 /**
+ * Remembers, within one import, whether a name has already been confirmed to exist -
+ * without it, a large CSV means up to 3 network round-trips per row against a remote
+ * database for values (category, shop) that repeat across many rows.
+ */
+function memoizedExists(check: (name: string) => Promise<boolean>) {
+  const known = new Map<string, boolean>();
+  return async function isKnownToExist(name: string): Promise<boolean> {
+    const key = name.toLowerCase();
+    const cached = known.get(key);
+    if (cached !== undefined) return cached;
+    const exists = await check(name);
+    known.set(key, exists);
+    return exists;
+  };
+}
+
+/**
+ * Same idea as memoizedExists, but keyed on two fields (brand and name) - an item's
+ * identity can't be safely round-tripped through one concatenated string, since a
+ * multi-word brand (for example "India Gate") makes "brand plus name" ambiguous to split
+ * back apart.
+ */
+function memoizedItemExists(check: (brand: string, name: string) => Promise<boolean>) {
+  const known = new Map<string, boolean>();
+  return async function isKnownToExist(brand: string, name: string): Promise<boolean> {
+    const key = `${brand.toLowerCase()}|${name.toLowerCase()}`;
+    const cached = known.get(key);
+    if (cached !== undefined) return cached;
+    const exists = await check(brand, name);
+    known.set(key, exists);
+    return exists;
+  };
+}
+
+/**
  * Parses and validates CSV against the household's current data without writing anything.
  *
  * Both the dry run and the commit call this, so the preview the user approves is exactly
- * what gets written — there is no second, divergent parse.
+ * what gets written - there is no second, divergent parse.
  */
-export function stageImport(householdId: number, csv: string): Staged {
+export async function stageImport(executor: Executor, householdId: number, csv: string): Promise<Staged> {
   const { headers, rows } = parseCsvWithHeader(csv);
 
   if (rows.length === 0) throw badRequest("That CSV has no data rows");
@@ -54,16 +89,35 @@ export function stageImport(householdId: number, csv: string): Staged {
     throw badRequest(`CSV is missing required column${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}`);
   }
 
-  const db = getDb();
-  const existingItem = db.prepare(
-    "SELECT 1 FROM items WHERE household_id = ? AND brand = ? COLLATE NOCASE AND name = ? COLLATE NOCASE",
-  );
-  const existingCategory = db.prepare(
-    "SELECT 1 FROM categories WHERE household_id = ? AND name = ? COLLATE NOCASE",
-  );
-  const existingShop = db.prepare(
-    "SELECT 1 FROM bills WHERE household_id = ? AND shop = ? COLLATE NOCASE",
-  );
+  const itemExists = memoizedItemExists(async function checkItem(brand, name) {
+    const [row] = await executor
+      .select({ id: items.id })
+      .from(items)
+      .where(
+        and(
+          eq(items.householdId, householdId),
+          sql`${items.brand} = ${brand} COLLATE NOCASE`,
+          sql`${items.name} = ${name} COLLATE NOCASE`,
+        ),
+      );
+    return row !== undefined;
+  });
+
+  const categoryExists = memoizedExists(async function checkCategory(name) {
+    const [row] = await executor
+      .select({ id: categories.id })
+      .from(categories)
+      .where(and(eq(categories.householdId, householdId), sql`${categories.name} = ${name} COLLATE NOCASE`));
+    return row !== undefined;
+  });
+
+  const shopExists = memoizedExists(async function checkShop(name) {
+    const [row] = await executor
+      .select({ id: bills.id })
+      .from(bills)
+      .where(and(eq(bills.householdId, householdId), sql`${bills.shop} = ${name} COLLATE NOCASE`));
+    return row !== undefined;
+  });
 
   const staged: Staged = {
     bills: [],
@@ -74,59 +128,55 @@ export function stageImport(householdId: number, csv: string): Staged {
     totalPaise: 0,
   };
 
-  // Rows sharing a date + shop + payment method are one trip to the shop, so one bill.
   const billsByKey = new Map<string, StagedBill>();
 
-  rows.forEach((row, index) => {
-    // +2: one for the header row, one to make it 1-indexed like a spreadsheet.
+  for (const [index, row] of rows.entries()) {
     const rowNumber = index + 2;
     const fail = (message: string) => staged.errors.push({ row: rowNumber, message });
 
     const billDate = (row["bill_date"] ?? "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(billDate) || Number.isNaN(Date.parse(billDate))) {
       fail(`bill_date "${billDate}" is not a valid YYYY-MM-DD date`);
-      return;
+      continue;
     }
 
     const shop = (row["shop"] ?? "").trim();
     if (!shop) {
       fail("shop is required");
-      return;
+      continue;
     }
 
     const itemName = (row["item_name"] ?? "").trim();
     if (!itemName) {
       fail("item_name is required");
-      return;
+      continue;
     }
 
     const unitRaw = (row["unit"] ?? "").trim();
     if (!isUnit(unitRaw)) {
       fail(`unit "${unitRaw}" is not one of kg, g, L, ml, pcs, pack, dozen`);
-      return;
+      continue;
     }
     const unit: Unit = unitRaw;
 
     const quantity = Number((row["quantity"] ?? "").replace(/,/g, ""));
     if (!Number.isFinite(quantity) || quantity <= 0) {
       fail(`quantity "${row["quantity"]}" must be a number greater than zero`);
-      return;
+      continue;
     }
 
-    // line_total is authoritative — it's what the receipt prints. unit_price is only a
-    // fallback for CSVs that never had a total, and gets multiplied back out to one.
     let rowLineTotalPaise = rupeesToPaise(row["line_total"] ?? "");
     if (rowLineTotalPaise === null) {
       const unitPricePaise = rupeesToPaise(row["unit_price"] ?? "");
       if (unitPricePaise === null) {
         fail("needs either line_total or unit_price");
-        return;
+        continue;
       }
       rowLineTotalPaise = lineTotalPaise(quantity, unitPricePaise);
     }
     if (rowLineTotalPaise < 0) {
       fail("price cannot be negative");
-      return;
+      continue;
     }
 
     const brand = (row["brand"] ?? "").trim();
@@ -135,16 +185,19 @@ export function stageImport(householdId: number, csv: string): Staged {
     const paymentMethod =
       PAYMENT_METHODS.find((method) => method.toLowerCase() === paymentRaw.toLowerCase()) ?? "Other";
 
-    const label = brand ? `${brand} ${itemName}` : itemName;
-    if (!existingItem.get(householdId, brand, itemName) && !staged.newItemLabels.has(label)) {
+    const label = brand ? brand + " " + itemName : itemName;
+    const alreadyExists = await itemExists(brand, itemName);
+    if (!alreadyExists && !staged.newItemLabels.has(label)) {
       staged.newItemLabels.add(label);
     }
-    if (categoryName && !existingCategory.get(householdId, categoryName)) {
-      staged.newCategoryNames.add(categoryName);
+    if (categoryName) {
+      const categoryAlreadyExists = await categoryExists(categoryName);
+      if (!categoryAlreadyExists) staged.newCategoryNames.add(categoryName);
     }
-    if (!existingShop.get(householdId, shop)) staged.newShops.add(shop);
+    const shopAlreadyExists = await shopExists(shop);
+    if (!shopAlreadyExists) staged.newShops.add(shop);
 
-    const key = `${billDate}|${shop.toLowerCase()}|${paymentMethod}`;
+    const key = billDate + "|" + shop.toLowerCase() + "|" + paymentMethod;
     let bill = billsByKey.get(key);
     if (!bill) {
       bill = {
@@ -161,7 +214,7 @@ export function stageImport(householdId: number, csv: string): Staged {
 
     bill.lines.push({ brand, itemName, categoryName, quantity, unit, lineTotalPaise: rowLineTotalPaise });
     staged.totalPaise += rowLineTotalPaise;
-  });
+  }
 
   return staged;
 }
@@ -179,97 +232,101 @@ export function toPreview(staged: Staged): ImportPreview {
 }
 
 /**
- * Writes a staged import. Rows that failed validation are skipped, not fatal — a single
+ * Writes a staged import. Rows that failed validation are skipped, not fatal - a single
  * bad row in a long export should not block the other 200.
  */
-export function commitImport(householdId: number, userId: number, staged: Staged): ImportResult {
-  const db = getDb();
+export async function commitImport(
+  db: DB,
+  householdId: number,
+  userId: number,
+  staged: Staged,
+): Promise<ImportResult> {
   const result: ImportResult = { billsCreated: 0, linesCreated: 0, itemsCreated: 0, categoriesCreated: 0 };
 
-  return transaction(db, () => {
+  return db.transaction(async function runCommit(tx) {
     const categoryIds = new Map<string, number>();
 
-    const findCategory = db.prepare(
-      "SELECT id FROM categories WHERE household_id = ? AND name = ? COLLATE NOCASE",
-    );
-    const nextSort = db.prepare(
-      "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM categories WHERE household_id = ?",
-    );
-    const insertCategory = db.prepare(
-      "INSERT INTO categories (household_id, name, sort_order) VALUES (?, ?, ?) RETURNING id",
-    );
-
-    const categoryIdFor = (name: string): number | null => {
+    async function categoryIdFor(name: string): Promise<number | null> {
       if (!name) return null;
-      const cached = categoryIds.get(name.toLowerCase());
+      const cacheKey = name.toLowerCase();
+      const cached = categoryIds.get(cacheKey);
       if (cached !== undefined) return cached;
 
-      const found = findCategory.get(householdId, name) as { id: number } | undefined;
+      const [found] = await tx
+        .select({ id: categories.id })
+        .from(categories)
+        .where(and(eq(categories.householdId, householdId), sql`${categories.name} = ${name} COLLATE NOCASE`));
       if (found) {
-        categoryIds.set(name.toLowerCase(), found.id);
+        categoryIds.set(cacheKey, found.id);
         return found.id;
       }
 
-      const sort = nextSort.get(householdId) as { n: number };
-      const created = insertCategory.get(householdId, name, sort.n) as { id: number };
+      const [sort] = await tx
+        .select({ n: sql<number>`COALESCE(MAX(${categories.sortOrder}), -1) + 1` })
+        .from(categories)
+        .where(eq(categories.householdId, householdId));
+
+      const [created] = await tx
+        .insert(categories)
+        .values({ householdId, name, sortOrder: sort!.n })
+        .returning({ id: categories.id });
       result.categoriesCreated += 1;
-      categoryIds.set(name.toLowerCase(), created.id);
-      return created.id;
-    };
+      categoryIds.set(cacheKey, created!.id);
+      return created!.id;
+    }
 
-    const insertBill = db.prepare(
-      `INSERT INTO bills (household_id, bill_date, shop, payment_method, stated_total_paise, note, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-    );
-    const insertLine = db.prepare(
-      `INSERT INTO bill_lines (bill_id, item_id, quantity, unit, line_total_paise, unit_price_paise, base_quantity, base_unit)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    const countItems = db.prepare("SELECT COUNT(*) AS n FROM items WHERE household_id = ?");
-
-    const itemsBefore = (countItems.get(householdId) as { n: number }).n;
+    const [itemsBeforeRow] = await tx
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(items)
+      .where(eq(items.householdId, householdId));
+    const itemsBefore = itemsBeforeRow!.n;
 
     for (const bill of staged.bills) {
-      // Prefer the printed total the CSV carried; fall back to the line sum so an import
-      // without a bill_total column still records something to check against.
-      const statedTotal =
-        bill.statedTotalPaise ?? bill.lines.reduce((sum, line) => sum + line.lineTotalPaise, 0);
+      const statedTotal = bill.statedTotalPaise ?? bill.lines.reduce((sum, line) => sum + line.lineTotalPaise, 0);
 
-      const created = insertBill.get(
-        householdId,
-        bill.billDate,
-        bill.shop,
-        bill.paymentMethod,
-        statedTotal,
-        bill.note,
-        userId,
-      ) as { id: number };
+      const [created] = await tx
+        .insert(bills)
+        .values({
+          householdId,
+          billDate: bill.billDate,
+          shop: bill.shop,
+          paymentMethod: bill.paymentMethod,
+          statedTotalPaise: statedTotal,
+          note: bill.note,
+          createdBy: userId,
+        })
+        .returning({ id: bills.id });
       result.billsCreated += 1;
 
       for (const line of bill.lines) {
-        const itemId = findOrCreateItem(householdId, {
+        const categoryId = await categoryIdFor(line.categoryName);
+        const itemId = await findOrCreateItem(tx, householdId, {
           brand: line.brand,
           name: line.itemName,
-          categoryId: categoryIdFor(line.categoryName),
+          categoryId,
           defaultUnit: line.unit,
         });
         const { baseQuantity, baseUnit } = toBaseQuantity(line.quantity, line.unit);
         const unitPricePaise = derivedUnitPricePaise(line.lineTotalPaise, line.quantity);
-        insertLine.run(
-          created.id,
+        await tx.insert(billLines).values({
+          billId: created!.id,
           itemId,
-          line.quantity,
-          line.unit,
-          line.lineTotalPaise,
+          quantity: line.quantity,
+          unit: line.unit,
+          lineTotalPaise: line.lineTotalPaise,
           unitPricePaise,
           baseQuantity,
           baseUnit,
-        );
+        });
         result.linesCreated += 1;
       }
     }
 
-    result.itemsCreated = (countItems.get(householdId) as { n: number }).n - itemsBefore;
+    const [itemsAfterRow] = await tx
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(items)
+      .where(eq(items.householdId, householdId));
+    result.itemsCreated = itemsAfterRow!.n - itemsBefore;
     return result;
   });
 }

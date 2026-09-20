@@ -12,10 +12,14 @@
     "start": "node server/index.ts",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:push": "node server/db/push.ts",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
     "cookie-parser": "^1.4.7",
+    "drizzle-orm": "^0.45.2",
     "express": "^5.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -31,6 +35,7 @@
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
+    "drizzle-kit": "^0.31.10",
     "typescript": "^5.7.3",
     "vite": "^6.1.0",
     "vitest": "^3.0.5"

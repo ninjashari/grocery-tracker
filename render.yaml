@@ -1,16 +1,15 @@
 services:
   - type: web
     name: grocery-tracker
-    env: docker
-    dockerfilePath: ./Dockerfile
-    plan: starter # disks require a paid plan; free instances can't attach one
+    env: node
+    plan: free
+    buildCommand: npm install && npm run db:push && npm run build
+    startCommand: npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATA_DIR
-        value: /data
-    disk:
-      name: grocery-data
-      mountPath: /data
-      sizeGB: 1
+      - key: TURSO_DATABASE_URL
+        sync: false # set manually in the Render dashboard — your Turso database's libsql:// URL
+      - key: TURSO_AUTH_TOKEN
+        sync: false # set manually in the Render dashboard — never commit a Turso auth token

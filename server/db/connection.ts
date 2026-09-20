@@ -1,90 +1,41 @@
-import { DatabaseSync } from "node:sqlite";
-import { readdirSync, readFileSync, mkdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createClient } from "@libsql/client";
+import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import * as schema from "./schema.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = join(here, "migrations");
+export type DB = LibSQLDatabase<typeof schema>;
+export type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
+/** Every `lib/*.ts` function takes one of these instead of calling `getDb()` itself, so
+ * which connection a query runs on — the top-level DB, or a transaction that must see it
+ * — is visible and type-checked at the call site rather than implicit. */
+export type Executor = DB | Tx;
 
-export type Db = DatabaseSync;
+let _db: DB | null = null;
 
-let db: Db | null = null;
-
-export function getDb(): Db {
-  if (!db) db = openDb(resolveDbPath());
-  return db;
-}
-
-export function resolveDbPath(): string {
-  if (process.env.DB_PATH) return resolve(process.env.DB_PATH);
-  const dataDir = resolve(process.env.DATA_DIR ?? "./data");
-  mkdirSync(dataDir, { recursive: true });
-  return join(dataDir, "grocery.db");
-}
-
-export function openDb(path: string): Db {
-  const connection = new DatabaseSync(path);
-  // WAL keeps reads from blocking the write that bill entry does on save.
-  if (path !== ":memory:") connection.exec("PRAGMA journal_mode = WAL");
-  connection.exec("PRAGMA foreign_keys = ON");
-  connection.exec("PRAGMA busy_timeout = 5000");
-  migrate(connection);
-  return connection;
+export function getDb(): DB {
+  if (!_db) {
+    const client = createClient(resolveDbConfig());
+    _db = drizzle(client, { schema });
+  }
+  return _db;
 }
 
 /**
- * Applies every unapplied .sql file in migrations/, in filename order, each in its own
- * transaction. Filenames are the migration identity, so never rename an applied one.
+ * `TURSO_DATABASE_URL` selects the target: unset defaults to a local embedded file (no
+ * account, no network — `npm run dev` needs nothing beyond `npm install`); a
+ * `libsql://...` URL plus `TURSO_AUTH_TOKEN` points at a real Turso database, which is
+ * what makes data survive a Render deploy (Render's free tier has no persistent disk —
+ * local files don't survive a redeploy either way, network storage does).
  */
-export function migrate(connection: Db): void {
-  connection.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      name       TEXT PRIMARY KEY,
-      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )
-  `);
+export function resolveDbConfig(): { url: string; authToken?: string } {
+  const url = process.env.TURSO_DATABASE_URL ?? "file:./data/grocery.db";
 
-  const applied = new Set(
-    connection.prepare("SELECT name FROM schema_migrations").all().map((row) => row["name"] as string),
-  );
-
-  const files = readdirSync(MIGRATIONS_DIR)
-    .filter((file) => file.endsWith(".sql"))
-    .sort();
-
-  for (const file of files) {
-    if (applied.has(file)) continue;
-    const sql = readFileSync(join(MIGRATIONS_DIR, file), "utf8");
-    connection.exec("BEGIN");
-    try {
-      connection.exec(sql);
-      connection.prepare("INSERT INTO schema_migrations(name) VALUES (?)").run(file);
-      connection.exec("COMMIT");
-    } catch (error) {
-      connection.exec("ROLLBACK");
-      throw new Error(`Migration ${file} failed: ${(error as Error).message}`, { cause: error });
-    }
+  if (url.startsWith("file:") && url !== "file::memory:") {
+    // createClient does not create the parent directory for a local file target.
+    mkdirSync(dirname(url.slice("file:".length)), { recursive: true });
   }
-}
 
-/**
- * Runs `fn` in a transaction, rolling back if it throws.
- *
- * Bill save writes a header plus N lines plus possibly new items; a partial write there
- * would leave a bill that doesn't match its receipt, so it is all-or-nothing.
- */
-export function transaction<T>(connection: Db, fn: () => T): T {
-  connection.exec("BEGIN");
-  try {
-    const result = fn();
-    connection.exec("COMMIT");
-    return result;
-  } catch (error) {
-    try {
-      connection.exec("ROLLBACK");
-    } catch {
-      // The transaction was already rolled back by SQLite; surface the original error.
-    }
-    throw error;
-  }
+  const authToken = process.env.TURSO_AUTH_TOKEN;
+  return authToken ? { url, authToken } : { url };
 }

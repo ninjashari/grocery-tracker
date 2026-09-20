@@ -133,7 +133,7 @@ export function Items() {
                   <th>Item</th>
                   <th>Category</th>
                   <th>Unit</th>
-                  <th className="num-cell">Last price</th>
+                  <th className="num-cell">Last total</th>
                   <th className="num-cell">Bought</th>
                   <th style={{ width: 190 }} />
                 </tr>
@@ -152,15 +152,16 @@ export function Items() {
                     <td className="small muted" data-label="Unit">
                       {item.defaultUnit}
                     </td>
-                    <td className="num-cell mono" data-label="Last price">
-                      {item.lastUnitPricePaise === null ? (
+                    <td className="num-cell mono" data-label="Last total">
+                      {item.lastLineTotalPaise === null ? (
                         <span className="faint">—</span>
                       ) : (
                         // One wrapper so this cell is a single flex item on mobile.
                         <div>
-                          {formatPaise(item.lastUnitPricePaise)}
-                          <span className="faint">/{item.lastUnit}</span>
-                          <div className="small faint">{item.lastPurchasedOn}</div>
+                          {formatPaise(item.lastLineTotalPaise)}
+                          <div className="small faint">
+                            {item.lastQuantity} {item.lastUnit} · {item.lastPurchasedOn}
+                          </div>
                         </div>
                       )}
                     </td>

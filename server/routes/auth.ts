@@ -1,5 +1,8 @@
 import { Router } from "express";
-import { getDb, transaction } from "../db/connection.ts";
+import { eq } from "drizzle-orm";
+import { getDb } from "../db/connection.ts";
+import type { Executor } from "../db/connection.ts";
+import { households, sessions, users } from "../db/schema.ts";
 import { seedCategories } from "../db/seed.ts";
 import { hashPassword, newSessionId, verifyPassword } from "../lib/password.ts";
 import { asyncHandler, conflict, parseOrThrow, unauthorized } from "../lib/http.ts";
@@ -17,15 +20,14 @@ import type { User } from "../../shared/types.ts";
 
 export const authRouter = Router();
 
-function emailTaken(email: string): boolean {
-  return getDb().prepare("SELECT 1 FROM users WHERE email = ?").get(email) !== undefined;
+async function emailTaken(executor: Executor, email: string): Promise<boolean> {
+  const [row] = await executor.select({ id: users.id }).from(users).where(eq(users.email, email));
+  return row !== undefined;
 }
 
-function createSession(userId: number): string {
+async function createSession(executor: Executor, userId: number): Promise<string> {
   const sessionId = newSessionId();
-  getDb()
-    .prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)")
-    .run(sessionId, userId, sessionExpiry());
+  await executor.insert(sessions).values({ id: sessionId, userId, expiresAt: sessionExpiry() });
   return sessionId;
 }
 
@@ -34,35 +36,32 @@ authRouter.post(
   "/signup",
   asyncHandler(async (req, res) => {
     const input = parseOrThrow(signupSchema, req.body);
-    if (emailTaken(input.email)) throw conflict("That email is already registered");
+    const db = getDb();
+    if (await emailTaken(db, input.email)) throw conflict("That email is already registered");
 
     const passwordHash = await hashPassword(input.password);
-    const db = getDb();
 
-    const user = transaction(db, () => {
-      const household = db
-        .prepare("INSERT INTO households (name) VALUES (?) RETURNING id")
-        .get(input.householdName) as { id: number };
+    const user = await db.transaction(async (tx) => {
+      const [household] = await tx.insert(households).values({ name: input.householdName }).returning({ id: households.id });
 
-      seedCategories(db, household.id);
+      await seedCategories(tx, household!.id);
 
-      const created = db
-        .prepare(
-          "INSERT INTO users (household_id, email, password_hash, name) VALUES (?, ?, ?, ?) RETURNING id",
-        )
-        .get(household.id, input.email, passwordHash, input.name) as { id: number };
+      const [created] = await tx
+        .insert(users)
+        .values({ householdId: household!.id, email: input.email, passwordHash, name: input.name })
+        .returning({ id: users.id });
 
       return {
-        id: created.id,
+        id: created!.id,
         email: input.email,
         name: input.name,
-        householdId: household.id,
+        householdId: household!.id,
         householdName: input.householdName,
       } satisfies User;
     });
 
-    setSessionCookie(res, createSession(user.id));
-    purgeExpiredSessions();
+    setSessionCookie(res, await createSession(db, user.id));
+    await purgeExpiredSessions();
     res.status(201).json(user);
   }),
 );
@@ -71,26 +70,28 @@ authRouter.post(
   "/login",
   asyncHandler(async (req, res) => {
     const input = parseOrThrow(loginSchema, req.body);
+    const db = getDb();
 
-    const row = getDb()
-      .prepare(
-        `SELECT u.id, u.email, u.name, u.password_hash AS passwordHash,
-                u.household_id AS householdId, h.name AS householdName
-           FROM users u
-           JOIN households h ON h.id = u.household_id
-          WHERE u.email = ?`,
-      )
-      .get(input.email) as
-      | { id: number; email: string; name: string; passwordHash: string; householdId: number; householdName: string }
-      | undefined;
+    const [row] = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        name: users.name,
+        passwordHash: users.passwordHash,
+        householdId: users.householdId,
+        householdName: households.name,
+      })
+      .from(users)
+      .innerJoin(households, eq(households.id, users.householdId))
+      .where(eq(users.email, input.email));
 
     // Same message and roughly the same work either way, so the response doesn't
     // reveal whether an email is registered.
     const ok = row ? await verifyPassword(input.password, row.passwordHash) : false;
     if (!row || !ok) throw unauthorized("Email or password is incorrect");
 
-    setSessionCookie(res, createSession(row.id));
-    purgeExpiredSessions();
+    setSessionCookie(res, await createSession(db, row.id));
+    await purgeExpiredSessions();
     res.json({
       id: row.id,
       email: row.email,
@@ -101,14 +102,17 @@ authRouter.post(
   }),
 );
 
-authRouter.post("/logout", (req, res) => {
-  const sessionId = req.cookies?.[SESSION_COOKIE];
-  if (typeof sessionId === "string") {
-    getDb().prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
-  }
-  clearSessionCookie(res);
-  res.status(204).end();
-});
+authRouter.post(
+  "/logout",
+  asyncHandler(async (req, res) => {
+    const sessionId = req.cookies?.[SESSION_COOKIE];
+    if (typeof sessionId === "string") {
+      await getDb().delete(sessions).where(eq(sessions.id, sessionId));
+    }
+    clearSessionCookie(res);
+    res.status(204).end();
+  }),
+);
 
 authRouter.get("/me", (req, res) => {
   if (!req.auth) {
@@ -126,15 +130,17 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const { householdId, householdName } = auth(req);
     const input = parseOrThrow(inviteSchema, req.body);
-    if (emailTaken(input.email)) throw conflict("That email is already registered");
+    const db = getDb();
+    if (await emailTaken(db, input.email)) throw conflict("That email is already registered");
 
     const passwordHash = await hashPassword(input.password);
-    const created = getDb()
-      .prepare("INSERT INTO users (household_id, email, password_hash, name) VALUES (?, ?, ?, ?) RETURNING id")
-      .get(householdId, input.email, passwordHash, input.name) as { id: number };
+    const [created] = await db
+      .insert(users)
+      .values({ householdId, email: input.email, passwordHash, name: input.name })
+      .returning({ id: users.id });
 
     res.status(201).json({
-      id: created.id,
+      id: created!.id,
       email: input.email,
       name: input.name,
       householdId,
@@ -143,10 +149,16 @@ authRouter.post(
   }),
 );
 
-authRouter.get("/members", requireAuth, (req, res) => {
-  const { householdId } = auth(req);
-  const members = getDb()
-    .prepare("SELECT id, email, name, created_at AS createdAt FROM users WHERE household_id = ? ORDER BY id")
-    .all(householdId);
-  res.json(members);
-});
+authRouter.get(
+  "/members",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { householdId } = auth(req);
+    const members = await getDb()
+      .select({ id: users.id, email: users.email, name: users.name, createdAt: users.createdAt })
+      .from(users)
+      .where(eq(users.householdId, householdId))
+      .orderBy(users.id);
+    res.json(members);
+  }),
+);

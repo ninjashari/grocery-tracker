@@ -1,4 +1,6 @@
-import { getDb, transaction } from "../db/connection.ts";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
+import type { DB, Executor } from "../db/connection.ts";
+import { bills, billLines, categories, items, users } from "../db/schema.ts";
 import { notFound } from "./http.ts";
 import { findOrCreateItem } from "./items.ts";
 import { toBaseQuantity } from "../../shared/units.ts";
@@ -6,87 +8,79 @@ import { derivedUnitPricePaise } from "../../shared/money.ts";
 import type { BillInput } from "../../shared/schemas.ts";
 import type { Bill, BillLine, BillSummary } from "../../shared/types.ts";
 
-const BILL_SELECT = `
-  SELECT b.id,
-         b.bill_date          AS billDate,
-         b.shop,
-         b.payment_method     AS paymentMethod,
-         b.stated_total_paise AS statedTotalPaise,
-         b.note,
-         COALESCE(SUM(bl.line_total_paise), 0) AS computedTotalPaise,
-         COUNT(bl.id)                          AS lineCount,
-         COALESCE(u.name, 'Unknown')           AS createdByName
-    FROM bills b
-    LEFT JOIN bill_lines bl ON bl.bill_id = b.id
-    LEFT JOIN users u       ON u.id = b.created_by
-`;
+const billSummaryColumns = {
+  id: bills.id,
+  billDate: bills.billDate,
+  shop: bills.shop,
+  paymentMethod: bills.paymentMethod,
+  statedTotalPaise: bills.statedTotalPaise,
+  note: bills.note,
+  computedTotalPaise: sql<number>`COALESCE(SUM(${billLines.lineTotalPaise}), 0)`,
+  lineCount: sql<number>`COUNT(${billLines.id})`,
+  createdByName: sql<string>`COALESCE(${users.name}, 'Unknown')`,
+};
 
 export type BillFilter = { from?: string; to?: string; shop?: string; limit: number; offset: number };
 
-export function listBills(householdId: number, filter: BillFilter): BillSummary[] {
-  const where = ["b.household_id = ?"];
-  const params: (string | number)[] = [householdId];
+export async function listBills(executor: Executor, householdId: number, filter: BillFilter): Promise<BillSummary[]> {
+  const conditions = [eq(bills.householdId, householdId)];
+  if (filter.from) conditions.push(gte(bills.billDate, filter.from));
+  if (filter.to) conditions.push(lte(bills.billDate, filter.to));
+  if (filter.shop) conditions.push(sql`${bills.shop} LIKE ${`%${filter.shop}%`} COLLATE NOCASE`);
 
-  if (filter.from) {
-    where.push("b.bill_date >= ?");
-    params.push(filter.from);
-  }
-  if (filter.to) {
-    where.push("b.bill_date <= ?");
-    params.push(filter.to);
-  }
-  if (filter.shop) {
-    where.push("b.shop LIKE ? COLLATE NOCASE");
-    params.push(`%${filter.shop}%`);
-  }
+  const rows = await executor
+    .select(billSummaryColumns)
+    .from(bills)
+    .leftJoin(billLines, eq(billLines.billId, bills.id))
+    .leftJoin(users, eq(users.id, bills.createdBy))
+    .where(and(...conditions))
+    .groupBy(bills.id)
+    .orderBy(sql`${bills.billDate} DESC`, sql`${bills.id} DESC`)
+    .limit(filter.limit)
+    .offset(filter.offset);
 
-  params.push(filter.limit, filter.offset);
-
-  return getDb()
-    .prepare(
-      `${BILL_SELECT}
-        WHERE ${where.join(" AND ")}
-        GROUP BY b.id
-        ORDER BY b.bill_date DESC, b.id DESC
-        LIMIT ? OFFSET ?`,
-    )
-    .all(...params) as BillSummary[];
+  return rows as unknown as BillSummary[];
 }
 
-export function getBillLines(billId: number): BillLine[] {
-  return getDb()
-    .prepare(
-      `SELECT bl.id,
-              bl.item_id          AS itemId,
-              i.brand,
-              i.name              AS itemName,
-              c.name              AS categoryName,
-              bl.quantity,
-              bl.unit,
-              bl.unit_price_paise AS unitPricePaise,
-              bl.line_total_paise AS lineTotalPaise,
-              bl.base_quantity    AS baseQuantity,
-              bl.base_unit        AS baseUnit
-         FROM bill_lines bl
-         JOIN items i           ON i.id = bl.item_id
-         LEFT JOIN categories c ON c.id = i.category_id
-        WHERE bl.bill_id = ?
-        ORDER BY bl.id`,
-    )
-    .all(billId) as BillLine[];
+export async function getBillLines(executor: Executor, billId: number): Promise<BillLine[]> {
+  const rows = await executor
+    .select({
+      id: billLines.id,
+      itemId: billLines.itemId,
+      brand: items.brand,
+      itemName: items.name,
+      categoryName: categories.name,
+      quantity: billLines.quantity,
+      unit: billLines.unit,
+      unitPricePaise: billLines.unitPricePaise,
+      lineTotalPaise: billLines.lineTotalPaise,
+      baseQuantity: billLines.baseQuantity,
+      baseUnit: billLines.baseUnit,
+    })
+    .from(billLines)
+    .innerJoin(items, eq(items.id, billLines.itemId))
+    .leftJoin(categories, eq(categories.id, items.categoryId))
+    .where(eq(billLines.billId, billId))
+    .orderBy(billLines.id);
+
+  return rows as unknown as BillLine[];
 }
 
-export function getBill(householdId: number, id: number): Bill | null {
-  const summary = getDb()
-    .prepare(`${BILL_SELECT} WHERE b.household_id = ? AND b.id = ? GROUP BY b.id`)
-    .get(householdId, id) as BillSummary | undefined;
+export async function getBill(executor: Executor, householdId: number, id: number): Promise<Bill | null> {
+  const [summary] = await executor
+    .select(billSummaryColumns)
+    .from(bills)
+    .leftJoin(billLines, eq(billLines.billId, bills.id))
+    .leftJoin(users, eq(users.id, bills.createdBy))
+    .where(and(eq(bills.householdId, householdId), eq(bills.id, id)))
+    .groupBy(bills.id);
 
   if (!summary) return null;
-  return { ...summary, lines: getBillLines(id) };
+  return { ...(summary as unknown as BillSummary), lines: await getBillLines(executor, id) };
 }
 
-export function requireBill(householdId: number, id: number): Bill {
-  const bill = getBill(householdId, id);
+export async function requireBill(executor: Executor, householdId: number, id: number): Promise<Bill> {
+  const bill = await getBill(executor, householdId, id);
   if (!bill) throw notFound("Bill not found");
   return bill;
 }
@@ -98,76 +92,83 @@ export function requireBill(householdId: number, id: number): Bill {
  * `billId` updates in place by replacing every line, which keeps edit semantics simple:
  * what you see in the form is exactly what ends up stored.
  */
-export function saveBill(
+export async function saveBill(
+  db: DB,
   householdId: number,
   userId: number,
   input: BillInput,
   billId?: number,
-): Bill {
-  const db = getDb();
-
-  const savedId = transaction(db, () => {
+): Promise<Bill> {
+  const savedId = await db.transaction(async (tx) => {
     let id = billId;
 
     if (id === undefined) {
-      const created = db
-        .prepare(
-          `INSERT INTO bills (household_id, bill_date, shop, payment_method, stated_total_paise, note, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-        )
-        .get(
+      const [created] = await tx
+        .insert(bills)
+        .values({
           householdId,
-          input.billDate,
-          input.shop,
-          input.paymentMethod,
-          input.statedTotalPaise,
-          input.note,
-          userId,
-        ) as { id: number };
-      id = created.id;
+          billDate: input.billDate,
+          shop: input.shop,
+          paymentMethod: input.paymentMethod,
+          statedTotalPaise: input.statedTotalPaise,
+          note: input.note,
+          createdBy: userId,
+        })
+        .returning({ id: bills.id });
+      id = created!.id;
     } else {
-      db.prepare(
-        `UPDATE bills
-            SET bill_date = ?, shop = ?, payment_method = ?, stated_total_paise = ?, note = ?
-          WHERE id = ? AND household_id = ?`,
-      ).run(input.billDate, input.shop, input.paymentMethod, input.statedTotalPaise, input.note, id, householdId);
+      await tx
+        .update(bills)
+        .set({
+          billDate: input.billDate,
+          shop: input.shop,
+          paymentMethod: input.paymentMethod,
+          statedTotalPaise: input.statedTotalPaise,
+          note: input.note,
+        })
+        .where(and(eq(bills.id, id), eq(bills.householdId, householdId)));
 
-      db.prepare("DELETE FROM bill_lines WHERE bill_id = ?").run(id);
+      await tx.delete(billLines).where(eq(billLines.billId, id));
     }
-
-    const insertLine = db.prepare(
-      `INSERT INTO bill_lines (bill_id, item_id, quantity, unit, line_total_paise, unit_price_paise, base_quantity, base_unit)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
 
     for (const line of input.lines) {
       const itemId =
         line.itemId !== undefined
-          ? assertItemInHousehold(householdId, line.itemId)
-          : findOrCreateItem(householdId, line.newItem!);
+          ? await assertItemInHousehold(tx, householdId, line.itemId)
+          : await findOrCreateItem(tx, householdId, line.newItem!);
 
       const { baseQuantity, baseUnit } = toBaseQuantity(line.quantity, line.unit);
       const unitPricePaise = derivedUnitPricePaise(line.lineTotalPaise, line.quantity);
-      insertLine.run(id, itemId, line.quantity, line.unit, line.lineTotalPaise, unitPricePaise, baseQuantity, baseUnit);
+      await tx.insert(billLines).values({
+        billId: id!,
+        itemId,
+        quantity: line.quantity,
+        unit: line.unit,
+        lineTotalPaise: line.lineTotalPaise,
+        unitPricePaise,
+        baseQuantity,
+        baseUnit,
+      });
     }
 
-    return id;
+    return id!;
   });
 
-  return requireBill(householdId, savedId);
+  return requireBill(db, householdId, savedId);
 }
 
 /** Guards against a request naming an item id that belongs to a different household. */
-function assertItemInHousehold(householdId: number, itemId: number): number {
-  const row = getDb()
-    .prepare("SELECT id FROM items WHERE id = ? AND household_id = ?")
-    .get(itemId, householdId) as { id: number } | undefined;
+async function assertItemInHousehold(executor: Executor, householdId: number, itemId: number): Promise<number> {
+  const [row] = await executor
+    .select({ id: items.id })
+    .from(items)
+    .where(and(eq(items.id, itemId), eq(items.householdId, householdId)));
   if (!row) throw notFound("Item not found");
   return row.id;
 }
 
-export function deleteBill(householdId: number, id: number): void {
-  requireBill(householdId, id);
+export async function deleteBill(executor: Executor, householdId: number, id: number): Promise<void> {
+  await requireBill(executor, householdId, id);
   // bill_lines cascade on delete.
-  getDb().prepare("DELETE FROM bills WHERE id = ? AND household_id = ?").run(id, householdId);
+  await executor.delete(bills).where(and(eq(bills.id, id), eq(bills.householdId, householdId)));
 }

@@ -1,4 +1,5 @@
-import type { Db } from "./connection.ts";
+import type { Executor } from "./connection.ts";
+import { categories } from "./schema.ts";
 
 /** Starting point for a new household. Fully editable afterwards. */
 export const DEFAULT_CATEGORIES = [
@@ -17,11 +18,8 @@ export const DEFAULT_CATEGORIES = [
 ] as const;
 
 /** Must run inside the same transaction that created the household. */
-export function seedCategories(db: Db, householdId: number): void {
-  const insert = db.prepare(
-    "INSERT INTO categories (household_id, name, sort_order) VALUES (?, ?, ?)",
-  );
-  DEFAULT_CATEGORIES.forEach((name, index) => {
-    insert.run(householdId, name, index);
-  });
+export async function seedCategories(executor: Executor, householdId: number): Promise<void> {
+  await executor
+    .insert(categories)
+    .values(DEFAULT_CATEGORIES.map((name, index) => ({ householdId, name, sortOrder: index })));
 }

@@ -1,5 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
+import { eq, lte } from "drizzle-orm";
 import { getDb } from "../db/connection.ts";
+import { households, sessions, users } from "../db/schema.ts";
 import { unauthorized } from "../lib/http.ts";
 
 export const SESSION_COOKIE = "gt_session";
@@ -44,30 +46,32 @@ export function clearSessionCookie(res: Response): void {
   res.clearCookie(SESSION_COOKIE, { path: "/" });
 }
 
-/** Resolves the session cookie to an AuthContext, or leaves req.auth undefined. */
-export function loadAuth(req: Request, _res: Response, next: NextFunction): void {
+/**
+ * Resolves the session cookie to an AuthContext, or leaves req.auth undefined. Registered
+ * as global middleware (see server/index.ts) — Express 5 forwards a rejected promise from
+ * an async middleware to the error handler automatically, so no explicit try/catch here.
+ */
+export async function loadAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const sessionId = req.cookies?.[SESSION_COOKIE];
   if (typeof sessionId !== "string" || sessionId.length === 0) {
     next();
     return;
   }
 
-  const row = getDb()
-    .prepare(
-      `SELECT s.expires_at   AS expiresAt,
-              u.id           AS userId,
-              u.email        AS email,
-              u.name         AS name,
-              u.household_id AS householdId,
-              h.name         AS householdName
-         FROM sessions s
-         JOIN users u      ON u.id = s.user_id
-         JOIN households h ON h.id = u.household_id
-        WHERE s.id = ?`,
-    )
-    .get(sessionId) as
-    | { expiresAt: string; userId: number; email: string; name: string; householdId: number; householdName: string }
-    | undefined;
+  const db = getDb();
+  const [row] = await db
+    .select({
+      expiresAt: sessions.expiresAt,
+      userId: users.id,
+      email: users.email,
+      name: users.name,
+      householdId: users.householdId,
+      householdName: households.name,
+    })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
+    .innerJoin(households, eq(households.id, users.householdId))
+    .where(eq(sessions.id, sessionId));
 
   if (!row) {
     next();
@@ -75,7 +79,7 @@ export function loadAuth(req: Request, _res: Response, next: NextFunction): void
   }
 
   if (Date.parse(row.expiresAt) <= Date.now()) {
-    getDb().prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+    await db.delete(sessions).where(eq(sessions.id, sessionId));
     next();
     return;
   }
@@ -105,6 +109,6 @@ export function auth(req: Request): AuthContext {
 }
 
 /** Opportunistic cleanup so the sessions table doesn't grow without bound. */
-export function purgeExpiredSessions(): void {
-  getDb().prepare("DELETE FROM sessions WHERE expires_at <= ?").run(new Date().toISOString());
+export async function purgeExpiredSessions(): Promise<void> {
+  await getDb().delete(sessions).where(lte(sessions.expiresAt, new Date().toISOString()));
 }

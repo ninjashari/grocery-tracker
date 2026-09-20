@@ -30,6 +30,9 @@ export type Item = {
   lastUnitPricePaise: number | null;
   lastUnit: Unit | null;
   lastPurchasedOn: string | null;
+  /** What that most recent purchase actually cost in total, and how much was bought. */
+  lastLineTotalPaise: number | null;
+  lastQuantity: number | null;
   purchaseCount: number;
 };
 
