@@ -1,14 +1,29 @@
+import { sql } from "drizzle-orm";
 import { pushSQLiteSchema } from "drizzle-kit/api";
 import { getDb, resolveDbConfig } from "./connection.ts";
 import * as schema from "./schema.ts";
 
+const db = getDb();
+
 /**
- * `drizzle-kit push` (the CLI) was found to silently fail to persist any writes against a
- * local file: URL in this environment — it prints "Changes applied" but the file is left
- * empty. The underlying `pushSQLiteSchema` API it's built on does not have this problem
- * (also what tests/api.test.ts uses against an in-memory database), so this script calls
- * it directly instead of shelling out to the CLI.
+ * `pushSQLiteSchema`'s diff engine is unreliable against a database that's already been
+ * pushed to once: re-running it doesn't detect "no changes needed" — it decides every
+ * table needs a full rebuild and emits duplicate CREATE INDEX statements for indexes that
+ * still exist from the first push, which crashes (confirmed by reproducing it locally:
+ * running this script twice in a row against the same file fails identically to the
+ * Render build log). Since this app's schema changes rarely, the reliable fix is to push
+ * only once: skip entirely if the schema is already there. Run `npm run db:push` by hand
+ * (locally, pointed at the production TURSO_DATABASE_URL/TURSO_AUTH_TOKEN) on the rare
+ * occasion the schema actually changes.
  */
-const { apply } = await pushSQLiteSchema(schema, getDb());
-await apply();
-console.log(`Schema pushed to ${resolveDbConfig().url}`);
+const existing = await db.all<{ name: string }>(
+  sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'households'`,
+);
+
+if (existing.length > 0) {
+  console.log(`Schema already present at ${resolveDbConfig().url}, skipping push.`);
+} else {
+  const { apply } = await pushSQLiteSchema(schema, db);
+  await apply();
+  console.log(`Schema pushed to ${resolveDbConfig().url}`);
+}
