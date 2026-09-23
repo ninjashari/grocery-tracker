@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, type Summary } from "../api.ts";
 import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
 import type { BillSummary, TopItem } from "@shared/types.ts";
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [recent, setRecent] = useState<BillSummary[]>([]);
   const [top, setTop] = useState<TopItem[]>([]);
@@ -43,47 +44,55 @@ export function Dashboard() {
       <ErrorBanner error={error} />
 
       <div className="grid cols-4">
-        <Card>
-          <div className="stat">
-            <div className="stat-label">This month</div>
-            <div className="stat-value">{formatPaise(summary?.currentMonth?.totalPaise ?? 0)}</div>
-            <div className="stat-note">
-              {monthChange === null ? (
-                <span className="faint">no previous month to compare</span>
-              ) : (
-                <span className={monthChange > 0 ? "up" : "down"}>
-                  {monthChange > 0 ? "▲" : "▼"} {Math.abs(monthChange).toFixed(1)}% vs last month
-                </span>
-              )}
+        <Link to="/reports" className="stat-card-link">
+          <Card>
+            <div className="stat">
+              <div className="stat-label">This month</div>
+              <div className="stat-value">{formatPaise(summary?.currentMonth?.totalPaise ?? 0)}</div>
+              <div className="stat-note">
+                {monthChange === null ? (
+                  <span className="faint">no previous month to compare</span>
+                ) : (
+                  <span className={monthChange > 0 ? "up" : "down"}>
+                    {monthChange > 0 ? "▲" : "▼"} {Math.abs(monthChange).toFixed(1)}% vs last month
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        </Link>
 
-        <Card>
-          <div className="stat">
-            <div className="stat-label">Last month</div>
-            <div className="stat-value">{formatPaise(summary?.previousMonth?.totalPaise ?? 0)}</div>
-            <div className="stat-note faint">previous calendar month with bills</div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="stat">
-            <div className="stat-label">All time</div>
-            <div className="stat-value">{formatPaise(summary?.totalPaise ?? 0)}</div>
-            <div className="stat-note faint">
-              across {summary?.billCount ?? 0} bill{summary?.billCount === 1 ? "" : "s"}
+        <Link to="/reports" className="stat-card-link">
+          <Card>
+            <div className="stat">
+              <div className="stat-label">Last month</div>
+              <div className="stat-value">{formatPaise(summary?.previousMonth?.totalPaise ?? 0)}</div>
+              <div className="stat-note faint">previous calendar month with bills</div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        </Link>
 
-        <Card>
-          <div className="stat">
-            <div className="stat-label">Items tracked</div>
-            <div className="stat-value">{summary?.itemCount ?? 0}</div>
-            <div className="stat-note faint">in your catalog</div>
-          </div>
-        </Card>
+        <Link to="/bills" className="stat-card-link">
+          <Card>
+            <div className="stat">
+              <div className="stat-label">All time</div>
+              <div className="stat-value">{formatPaise(summary?.totalPaise ?? 0)}</div>
+              <div className="stat-note faint">
+                across {summary?.billCount ?? 0} bill{summary?.billCount === 1 ? "" : "s"}
+              </div>
+            </div>
+          </Card>
+        </Link>
+
+        <Link to="/items" className="stat-card-link">
+          <Card>
+            <div className="stat">
+              <div className="stat-label">Items tracked</div>
+              <div className="stat-value">{summary?.itemCount ?? 0}</div>
+              <div className="stat-note faint">in your catalog</div>
+            </div>
+          </Card>
+        </Link>
       </div>
 
       <div className="grid cols-2" style={{ marginTop: "1.25rem" }}>
@@ -99,10 +108,10 @@ export function Dashboard() {
                 <Link to="/new">Add your first bill</Link> to start tracking.
               </Empty>
             ) : (
-              <table className="row-hover">
+              <table className="row-hover row-link">
                 <tbody>
                   {recent.map((bill) => (
-                    <tr key={bill.id}>
+                    <tr key={bill.id} onClick={() => navigate(`/bills/${bill.id}/edit`)}>
                       <td className="cell-title">
                         <strong>{bill.shop}</strong>
                         <div className="small faint">
@@ -129,10 +138,13 @@ export function Dashboard() {
             {top.length === 0 ? (
               <Empty title="Nothing to rank yet">Add a bill and this fills in.</Empty>
             ) : (
-              <table className="row-hover">
+              <table className="row-hover row-link">
                 <tbody>
                   {top.map((item) => (
-                    <tr key={`${item.itemId}-${item.baseUnit}`}>
+                    <tr
+                      key={`${item.itemId}-${item.baseUnit}`}
+                      onClick={() => navigate(`/reports?itemId=${item.itemId}`)}
+                    >
                       <td className="cell-title">
                         <strong>{item.itemName}</strong>
                         {item.brand && <span className="faint"> · {item.brand}</span>}

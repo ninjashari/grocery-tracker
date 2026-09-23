@@ -300,6 +300,24 @@ main {
   margin-top: 1.25rem;
 }
 
+/* Wraps a Card in an <a> (dashboard stat cards) without touching the shared .card rule
+   used by every other page. */
+.stat-card-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.stat-card-link .card {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stat-card-link:hover .card,
+.stat-card-link:focus-visible .card {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow), 0 0 0 1px var(--border-strong);
+}
+
 .card-head {
   display: flex;
   align-items: center;
@@ -564,6 +582,13 @@ tbody tr:last-child td {
 
 .row-hover tbody tr:hover {
   background: var(--surface-2);
+}
+
+/* Dashboard preview tables only — Bills.tsx/Items.tsx rows keep their existing
+   button-only interaction, so this cursor affordance is scoped to this modifier rather
+   than added to .row-hover itself. */
+.row-link tbody tr {
+  cursor: pointer;
 }
 
 /* Wraps the nested bill-detail sub-table (Bills.tsx) — tinted to read as an inset panel
