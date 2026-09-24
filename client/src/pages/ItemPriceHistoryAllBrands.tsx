@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { PriceHistoryTabs } from "../components/PriceHistoryTabs.tsx";
-import { Card, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
+import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
 import { BASE_PRICE_STEP } from "@shared/units.ts";
 import type { Item, PriceHistoryByName } from "@shared/types.ts";
@@ -19,7 +19,9 @@ function cssVar(name: string, fallback: string): string {
  * PriceHistory.tsx's per-brand trend for one exact item. */
 export function ItemPriceHistoryAllBrands() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
+  const [items, setItems] = useState<Item[]>([]);
   const [item, setItem] = useState<Item | null>(null);
   const [history, setHistory] = useState<PriceHistoryByName | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,6 +30,11 @@ export function ItemPriceHistoryAllBrands() {
   const accent = useMemo(() => cssVar("--accent", "#2563eb"), []);
   const accentTeal = useMemo(() => cssVar("--accent-teal", "#0d9488"), []);
   const isPhone = useMediaQuery("(max-width: 640px)");
+
+  // Populates the item picker — only items with enough purchases to show a trend.
+  useEffect(() => {
+    api.items().then(setItems).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -52,6 +59,7 @@ export function ItemPriceHistoryAllBrands() {
     detail: `${point.quantity} ${point.unit} @ ${formatPaise(point.unitPricePaise)}/${point.unit}`,
   }));
 
+  const pickableItems = items.filter((entry) => entry.purchaseCount > 1);
   const subtitle = history ? `${history.name} · every brand` : undefined;
 
   if (loading && !history) return <Loading />;
@@ -65,6 +73,25 @@ export function ItemPriceHistoryAllBrands() {
       {item && <PriceHistoryTabs itemId={item.id} categoryId={item.categoryId} />}
 
       <Card>
+        <CardHead title="Pick an item">
+          <div style={{ minWidth: 260 }}>
+            <select
+              value={id ?? ""}
+              aria-label="Item"
+              onChange={(event) => {
+                if (event.target.value) navigate(`/items/${event.target.value}/price-history/all-brands`);
+              }}
+            >
+              <option value="">Pick an item…</option>
+              {pickableItems.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.brand ? `${entry.brand} ${entry.name}` : entry.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </CardHead>
+
         <div className="card-body">
           {!history ? null : history.points.length < 2 ? (
             <Empty title="Not enough purchases yet">
