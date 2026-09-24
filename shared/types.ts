@@ -120,6 +120,21 @@ export type PriceHistory = {
   changeVsPreviousPct: number | null;
 };
 
+export type PricePointWithBrand = PricePoint & { brand: string };
+
+/** Same shape as PriceHistory, but merged across every brand sharing an item's name —
+ * there's no single Item to embed since brand varies per point. */
+export type PriceHistoryByName = {
+  name: string;
+  categoryName: string | null;
+  baseUnit: BaseUnit | null;
+  points: PricePointWithBrand[];
+  firstBasePricePaise: number | null;
+  latestBasePricePaise: number | null;
+  changeVsFirstPct: number | null;
+  changeVsPreviousPct: number | null;
+};
+
 export type TopItem = {
   itemId: number;
   brand: string;

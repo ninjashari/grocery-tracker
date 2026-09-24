@@ -5,10 +5,23 @@ import { billLines, bills, categories, items } from "../db/schema.ts";
 import { asyncHandler, parseOrThrow } from "../lib/http.ts";
 import { auth } from "../middleware/auth.ts";
 import { requireItem } from "../lib/items.ts";
-import { priceHistoryQuerySchema, spendQuerySchema, topItemsQuerySchema } from "../../shared/schemas.ts";
+import {
+  priceHistoryByNameQuerySchema,
+  priceHistoryQuerySchema,
+  spendQuerySchema,
+  topItemsQuerySchema,
+} from "../../shared/schemas.ts";
 import { basePricePaise } from "../../shared/units.ts";
 import type { BaseUnit } from "../../shared/units.ts";
-import type { PriceHistory, PricePoint, SpendBucket, SpendReport, TopItem } from "../../shared/types.ts";
+import type {
+  PriceHistory,
+  PriceHistoryByName,
+  PricePoint,
+  PricePointWithBrand,
+  SpendBucket,
+  SpendReport,
+  TopItem,
+} from "../../shared/types.ts";
 
 export const reportsRouter = Router();
 
@@ -49,7 +62,13 @@ reportsRouter.get(
       .innerJoin(bills, eq(bills.id, billLines.billId))
       .innerJoin(items, eq(items.id, billLines.itemId))
       .leftJoin(categories, eq(categories.id, items.categoryId))
-      .where(and(eq(bills.householdId, householdId), ...dateConditions(query.from, query.to)))
+      .where(
+        and(
+          eq(bills.householdId, householdId),
+          ...dateConditions(query.from, query.to),
+          ...(query.categoryId !== undefined ? [eq(items.categoryId, query.categoryId)] : []),
+        ),
+      )
       .groupBy(groupExpr)
       .orderBy(query.groupBy === "month" ? groupExpr : sql`${totalPaiseExpr} DESC`);
 
@@ -122,6 +141,69 @@ reportsRouter.get(
       changeVsFirstPct: pctChange(first, latest),
       changeVsPreviousPct: pctChange(previous, latest),
     } satisfies PriceHistory);
+  }),
+);
+
+/**
+ * Same as /price-history, but merged across every brand sharing this item's name —
+ * "irrespective of brand". Groups on (household_id, name COLLATE NOCASE), the same
+ * case-insensitive idiom findOrCreateItem/assertItemNameFree use, just without the brand
+ * comparison half.
+ */
+reportsRouter.get(
+  "/price-history-all-brands",
+  asyncHandler(async (req, res) => {
+    const { householdId } = auth(req);
+    const query = parseOrThrow(priceHistoryByNameQuerySchema, req.query);
+    const db = getDb();
+
+    const [categoryRow] = await db
+      .select({ categoryName: categories.name })
+      .from(items)
+      .leftJoin(categories, eq(categories.id, items.categoryId))
+      .where(and(eq(items.householdId, householdId), sql`${items.name} = ${query.name} COLLATE NOCASE`))
+      .limit(1);
+
+    const rows = await db
+      .select({
+        billId: bills.id,
+        billDate: bills.billDate,
+        shop: bills.shop,
+        brand: items.brand,
+        quantity: billLines.quantity,
+        unit: billLines.unit,
+        unitPricePaise: billLines.unitPricePaise,
+        lineTotalPaise: billLines.lineTotalPaise,
+        baseQuantity: billLines.baseQuantity,
+        baseUnit: billLines.baseUnit,
+      })
+      .from(billLines)
+      .innerJoin(bills, eq(bills.id, billLines.billId))
+      .innerJoin(items, eq(items.id, billLines.itemId))
+      .where(and(eq(items.householdId, householdId), sql`${items.name} = ${query.name} COLLATE NOCASE`))
+      .orderBy(bills.billDate, billLines.id);
+
+    const points: PricePointWithBrand[] = (rows as unknown as Omit<PricePointWithBrand, "basePricePaise">[]).flatMap(
+      (row) => {
+        const price = basePricePaise(row.lineTotalPaise, row.baseQuantity, row.baseUnit);
+        return price === null ? [] : [{ ...row, basePricePaise: price }];
+      },
+    );
+
+    const first = points[0]?.basePricePaise ?? null;
+    const latest = points.at(-1)?.basePricePaise ?? null;
+    const previous = points.length >= 2 ? points.at(-2)!.basePricePaise : null;
+
+    res.json({
+      name: query.name,
+      categoryName: categoryRow?.categoryName ?? null,
+      baseUnit: (points[0]?.baseUnit as BaseUnit | undefined) ?? null,
+      points,
+      firstBasePricePaise: first,
+      latestBasePricePaise: latest,
+      changeVsFirstPct: pctChange(first, latest),
+      changeVsPreviousPct: pctChange(previous, latest),
+    } satisfies PriceHistoryByName);
   }),
 );
 

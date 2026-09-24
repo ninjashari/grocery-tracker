@@ -5,7 +5,7 @@ import { notFound } from "./http.ts";
 import { findOrCreateItem } from "./items.ts";
 import { toBaseQuantity } from "../../shared/units.ts";
 import { derivedUnitPricePaise } from "../../shared/money.ts";
-import type { BillInput } from "../../shared/schemas.ts";
+import type { BillInput, PaymentMethod } from "../../shared/schemas.ts";
 import type { Bill, BillLine, BillSummary, ItemPurchase } from "../../shared/types.ts";
 
 const billSummaryColumns = {
@@ -20,13 +20,32 @@ const billSummaryColumns = {
   createdByName: sql<string>`COALESCE(${users.name}, 'Unknown')`,
 };
 
-export type BillFilter = { from?: string; to?: string; shop?: string; limit: number; offset: number };
+export type BillFilter = {
+  from?: string;
+  to?: string;
+  shop?: string;
+  categoryId?: number;
+  paymentMethod?: PaymentMethod;
+  limit: number;
+  offset: number;
+};
 
 export async function listBills(executor: Executor, householdId: number, filter: BillFilter): Promise<BillSummary[]> {
   const conditions = [eq(bills.householdId, householdId)];
   if (filter.from) conditions.push(gte(bills.billDate, filter.from));
   if (filter.to) conditions.push(lte(bills.billDate, filter.to));
   if (filter.shop) conditions.push(sql`${bills.shop} LIKE ${`%${filter.shop}%`} COLLATE NOCASE`);
+  if (filter.paymentMethod) conditions.push(eq(bills.paymentMethod, filter.paymentMethod));
+  if (filter.categoryId !== undefined) {
+    // A category filter narrows which BILLS qualify, without touching the LEFT JOIN below
+    // that sums a qualifying bill's full total — an inner join on items/categoryId here
+    // would silently shrink computedTotalPaise to "spend in that category only".
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM bill_lines bl2
+      JOIN items i2 ON i2.id = bl2.item_id
+      WHERE bl2.bill_id = bills.id AND i2.category_id = ${filter.categoryId}
+    )`);
+  }
 
   const rows = await executor
     .select(billSummaryColumns)

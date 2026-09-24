@@ -1,30 +1,60 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api.ts";
 import { Card, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
-import type { Bill, BillSummary } from "@shared/types.ts";
+import { PAYMENT_METHODS, type PaymentMethod } from "@shared/schemas.ts";
+import type { Bill, BillSummary, Category } from "@shared/types.ts";
 
 export function Bills() {
   const navigate = useNavigate();
   const [bills, setBills] = useState<BillSummary[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [expanded, setExpanded] = useState<Record<number, Bill>>({});
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [shop, setShop] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const from = searchParams.get("from") ?? "";
+  const to = searchParams.get("to") ?? "";
+  const shop = searchParams.get("shop") ?? "";
+  const categoryId = searchParams.get("categoryId") ?? "";
+  const paymentMethod = searchParams.get("paymentMethod") ?? "";
+
+  function setFilter(key: string, value: string) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
+  const categoryIdByName = useMemo(() => new Map(categories.map((c) => [c.name, c.id])), [categories]);
 
   const load = useCallback(() => {
     setLoading(true);
     api
-      .bills({ from: from || undefined, to: to || undefined, shop: shop || undefined })
+      .bills({
+        from: from || undefined,
+        to: to || undefined,
+        shop: shop || undefined,
+        categoryId: categoryId ? Number(categoryId) : undefined,
+        paymentMethod: paymentMethod ? (paymentMethod as PaymentMethod) : undefined,
+      })
       .then(setBills)
       .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Could not load bills"))
       .finally(() => setLoading(false));
-  }, [from, to, shop]);
+  }, [from, to, shop, categoryId, paymentMethod]);
 
   useEffect(load, [load]);
+
+  useEffect(() => {
+    api.categories().then(setCategories).catch(() => {});
+  }, []);
 
   async function toggle(id: number) {
     if (expanded[id]) {
@@ -75,31 +105,53 @@ export function Bills() {
           <div className="form-row">
             <div>
               <label htmlFor="from">From</label>
-              <input id="from" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+              <input id="from" type="date" value={from} onChange={(event) => setFilter("from", event.target.value)} />
             </div>
             <div>
               <label htmlFor="to">To</label>
-              <input id="to" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+              <input id="to" type="date" value={to} onChange={(event) => setFilter("to", event.target.value)} />
             </div>
             <div>
               <label htmlFor="shopFilter">Shop</label>
               <input
                 id="shopFilter"
                 value={shop}
-                onChange={(event) => setShop(event.target.value)}
+                onChange={(event) => setFilter("shop", event.target.value)}
                 placeholder="any shop"
               />
             </div>
-            <div className="shrink">
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => {
-                  setFrom("");
-                  setTo("");
-                  setShop("");
-                }}
+            <div>
+              <label htmlFor="categoryFilter">Category</label>
+              <select
+                id="categoryFilter"
+                value={categoryId}
+                onChange={(event) => setFilter("categoryId", event.target.value)}
               >
+                <option value="">All categories</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="paymentFilter">Paid with</label>
+              <select
+                id="paymentFilter"
+                value={paymentMethod}
+                onChange={(event) => setFilter("paymentMethod", event.target.value)}
+              >
+                <option value="">Any</option>
+                {PAYMENT_METHODS.map((method) => (
+                  <option key={method} value={method}>
+                    {method}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="shrink">
+              <button type="button" className="ghost" onClick={() => setSearchParams(new URLSearchParams(), { replace: true })}>
                 Clear
               </button>
             </div>
@@ -113,7 +165,11 @@ export function Bills() {
             <Loading />
           ) : bills.length === 0 ? (
             <Empty title="No bills match">
-              {from || to || shop ? "Try widening the filters." : <Link to="/new">Add your first bill</Link>}
+              {from || to || shop || categoryId || paymentMethod ? (
+                "Try widening the filters."
+              ) : (
+                <Link to="/new">Add your first bill</Link>
+              )}
             </Empty>
           ) : (
             <table className="row-hover">
@@ -149,14 +205,18 @@ export function Bills() {
                           </button>
                         </td>
                         <td className="mono small" data-label="Date">
-                          {bill.billDate}
+                          <Link to={`/bills/${bill.id}/edit`}>{bill.billDate}</Link>
                         </td>
                         <td className="cell-title">
-                          <strong>{bill.shop}</strong>
+                          <Link to={`/bills?shop=${encodeURIComponent(bill.shop)}`}>
+                            <strong>{bill.shop}</strong>
+                          </Link>
                           {bill.note && <div className="small faint">{bill.note}</div>}
                         </td>
                         <td data-label="Paid with">
-                          <span className="pill">{bill.paymentMethod}</span>
+                          <Link to={`/bills?paymentMethod=${bill.paymentMethod}`} className="pill pill-link">
+                            {bill.paymentMethod}
+                          </Link>
                         </td>
                         <td className="num-cell" data-label="Items">
                           {bill.lineCount}
@@ -213,7 +273,16 @@ export function Bills() {
                                         {line.itemName}
                                       </td>
                                       <td className="small muted" data-label="Category">
-                                        {line.categoryName ?? "Uncategorised"}
+                                        {line.categoryName && categoryIdByName.get(line.categoryName) !== undefined ? (
+                                          <Link
+                                            to={`/items?categoryId=${categoryIdByName.get(line.categoryName)}`}
+                                            className="pill pill-link"
+                                          >
+                                            {line.categoryName}
+                                          </Link>
+                                        ) : (
+                                          (line.categoryName ?? "Uncategorised")
+                                        )}
                                       </td>
                                       <td className="num-cell mono" data-label="Qty">
                                         {line.quantity} {line.unit}

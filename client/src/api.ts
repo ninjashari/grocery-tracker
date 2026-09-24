@@ -8,11 +8,12 @@ import type {
   Item,
   ItemPurchase,
   PriceHistory,
+  PriceHistoryByName,
   SpendReport,
   TopItem,
   User,
 } from "@shared/types.ts";
-import type { BillInput, ItemCreateInput, ItemUpdateInput, SpendGrouping } from "@shared/schemas.ts";
+import type { BillInput, ItemCreateInput, ItemUpdateInput, PaymentMethod, SpendGrouping } from "@shared/schemas.ts";
 
 /** An API error carrying the server's per-field messages, so forms can show them inline. */
 export class ApiRequestError extends Error {
@@ -116,16 +117,28 @@ export const api = {
   shops: () => request<Shop[]>("/items/shops"),
   itemBills: (itemId: number) => request<ItemPurchase[]>(`/items/${itemId}/bills`),
 
-  bills: (params: { from?: string; to?: string; shop?: string; limit?: number; offset?: number } = {}) =>
+  bills: (
+    params: {
+      from?: string;
+      to?: string;
+      shop?: string;
+      categoryId?: number;
+      paymentMethod?: PaymentMethod;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) =>
     request<BillSummary[]>(`/bills${qs(params)}`),
   bill: (id: number) => request<Bill>(`/bills/${id}`),
   createBill: (body: BillInput) => request<Bill>("/bills", { method: "POST", body }),
   updateBill: (id: number, body: BillInput) => request<Bill>(`/bills/${id}`, { method: "PATCH", body }),
   deleteBill: (id: number) => request<void>(`/bills/${id}`, { method: "DELETE" }),
 
-  spend: (params: { from?: string; to?: string; groupBy?: SpendGrouping } = {}) =>
+  spend: (params: { from?: string; to?: string; groupBy?: SpendGrouping; categoryId?: number } = {}) =>
     request<SpendReport>(`/reports/spend${qs(params)}`),
   priceHistory: (itemId: number) => request<PriceHistory>(`/reports/price-history${qs({ itemId })}`),
+  priceHistoryAllBrands: (name: string) =>
+    request<PriceHistoryByName>(`/reports/price-history-all-brands${qs({ name })}`),
   topItems: (params: { from?: string; to?: string; metric?: "spend" | "quantity"; limit?: number } = {}) =>
     request<TopItem[]>(`/reports/top-items${qs(params)}`),
   summary: () => request<Summary>("/reports/summary"),

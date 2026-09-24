@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api.ts";
 import { Card, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
@@ -58,7 +58,14 @@ export function ItemBillHistory() {
                     onClick={() => navigate(`/bills/${purchase.billId}/edit`)}
                   >
                     <td className="mono small cell-title">{purchase.billDate}</td>
-                    <td data-label="Shop">{purchase.shop}</td>
+                    <td data-label="Shop">
+                      <Link
+                        to={`/bills?shop=${encodeURIComponent(purchase.shop)}`}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {purchase.shop}
+                      </Link>
+                    </td>
                     <td className="num-cell mono" data-label="Bought">
                       {purchase.quantity} {purchase.unit}
                     </td>

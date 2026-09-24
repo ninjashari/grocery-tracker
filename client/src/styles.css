@@ -7,17 +7,24 @@
   --text: #14181f;
   --text-muted: #626b78;
   --text-faint: #8b949f;
-  --accent: #1f6f43;
-  --accent-soft: #e5f2ea;
+  --accent: #2563eb;
+  --accent-2: #7c3aed;
+  --accent-teal: #0d9488;
+  --accent-soft: #eef2ff;
   --accent-text: #ffffff;
+  --positive: #1f7a4d;
+  --positive-soft: #e5f2ea;
   --warn: #9a6207;
   --warn-soft: #fdf3dd;
   --warn-border: #e8c97a;
   --danger: #ad2b2b;
   --danger-soft: #fbeaea;
-  --radius: 10px;
-  --radius-sm: 6px;
-  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 4px 12px rgb(16 24 40 / 5%);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgb(37 46 76 / 6%), 0 4px 12px rgb(37 46 76 / 6%);
+  --shadow-lg: 0 20px 50px -12px rgb(37 46 76 / 22%), 0 8px 20px rgb(37 46 76 / 12%);
+  --gradient-primary: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  --gradient-surface: linear-gradient(160deg, #eef2ff 0%, #f0fbfa 100%);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
   color-scheme: light dark;
@@ -33,15 +40,22 @@
     --text: #e8ecf1;
     --text-muted: #98a2b0;
     --text-faint: #6f7987;
-    --accent: #4ba573;
-    --accent-soft: #16281f;
-    --accent-text: #08130d;
+    --accent: #60a5fa;
+    --accent-2: #a78bfa;
+    --accent-teal: #2dd4bf;
+    --accent-soft: #1b2440;
+    --accent-text: #0b1120;
+    --positive: #4ba573;
+    --positive-soft: #16281f;
     --warn: #e0b256;
     --warn-soft: #2a2415;
     --warn-border: #5c4c26;
     --danger: #e07a7a;
     --danger-soft: #2b1a1a;
     --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 14px rgb(0 0 0 / 22%);
+    --shadow-lg: 0 20px 60px -10px rgb(0 0 0 / 55%), 0 8px 24px rgb(0 0 0 / 35%);
+    --gradient-primary: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+    --gradient-surface: linear-gradient(160deg, #161b2e 0%, #131f1e 100%);
   }
 }
 
@@ -57,15 +71,22 @@
   --text: #e8ecf1;
   --text-muted: #98a2b0;
   --text-faint: #6f7987;
-  --accent: #4ba573;
-  --accent-soft: #16281f;
-  --accent-text: #08130d;
+  --accent: #60a5fa;
+  --accent-2: #a78bfa;
+  --accent-teal: #2dd4bf;
+  --accent-soft: #1b2440;
+  --accent-text: #0b1120;
+  --positive: #4ba573;
+  --positive-soft: #16281f;
   --warn: #e0b256;
   --warn-soft: #2a2415;
   --warn-border: #5c4c26;
   --danger: #e07a7a;
   --danger-soft: #2b1a1a;
   --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 14px rgb(0 0 0 / 22%);
+  --shadow-lg: 0 20px 60px -10px rgb(0 0 0 / 55%), 0 8px 24px rgb(0 0 0 / 35%);
+  --gradient-primary: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+  --gradient-surface: linear-gradient(160deg, #161b2e 0%, #131f1e 100%);
 }
 
 :root[data-theme="light"] {
@@ -78,15 +99,22 @@
   --text: #14181f;
   --text-muted: #626b78;
   --text-faint: #8b949f;
-  --accent: #1f6f43;
-  --accent-soft: #e5f2ea;
+  --accent: #2563eb;
+  --accent-2: #7c3aed;
+  --accent-teal: #0d9488;
+  --accent-soft: #eef2ff;
   --accent-text: #ffffff;
+  --positive: #1f7a4d;
+  --positive-soft: #e5f2ea;
   --warn: #9a6207;
   --warn-soft: #fdf3dd;
   --warn-border: #e8c97a;
   --danger: #ad2b2b;
   --danger-soft: #fbeaea;
-  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 4px 12px rgb(16 24 40 / 5%);
+  --shadow: 0 1px 2px rgb(37 46 76 / 6%), 0 4px 12px rgb(37 46 76 / 6%);
+  --shadow-lg: 0 20px 50px -12px rgb(37 46 76 / 22%), 0 8px 20px rgb(37 46 76 / 12%);
+  --gradient-primary: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  --gradient-surface: linear-gradient(160deg, #eef2ff 0%, #f0fbfa 100%);
 }
 
 * {
@@ -103,7 +131,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.5 "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -146,7 +174,7 @@ a {
   align-items: center;
   gap: 1.25rem;
   padding: 0.6rem 1.25rem;
-  background: var(--surface);
+  background: var(--gradient-surface);
   border-bottom: 1px solid var(--border);
 }
 
@@ -167,7 +195,7 @@ a {
   width: 26px;
   height: 26px;
   border-radius: 7px;
-  background: var(--accent);
+  background: var(--gradient-primary);
   color: var(--accent-text);
   font-size: 14px;
 }
@@ -287,6 +315,13 @@ main {
   font-size: 0.9rem;
 }
 
+.page-head h1 {
+  background: var(--gradient-primary);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
 /* --------------------------------- cards ---------------------------------- */
 
 .card {
@@ -298,6 +333,10 @@ main {
 
 .card + .card {
   margin-top: 1.25rem;
+}
+
+.card.stat-card {
+  background: var(--gradient-surface);
 }
 
 /* Wraps a Card in an <a> (dashboard stat cards) without touching the shared .card rule
@@ -314,8 +353,8 @@ main {
 
 .stat-card-link:hover .card,
 .stat-card-link:focus-visible .card {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow), 0 0 0 1px var(--border-strong);
+  border-color: var(--accent);
+  box-shadow: var(--shadow), 0 0 0 1px var(--accent);
 }
 
 .card-head {
@@ -464,14 +503,15 @@ button:disabled {
 }
 
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--gradient-primary);
+  border-color: transparent;
   color: var(--accent-text);
+  box-shadow: 0 1px 2px rgb(37 46 76 / 15%);
 }
 
 button.primary:hover:not(:disabled) {
   filter: brightness(1.08);
-  background: var(--accent);
+  background: var(--gradient-primary);
 }
 
 button.ghost {
@@ -533,7 +573,8 @@ button.small {
   color: var(--text-muted);
 }
 
-.segmented button.on {
+.segmented button.on,
+.segmented a.on {
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow);
@@ -634,11 +675,22 @@ tbody tr:last-child td {
   color: var(--accent);
 }
 
+/* Layered on top of the plain .pill so Part B's clickable category/payment badges start
+   visually identical to today's static pills, only signalling interactivity on hover. */
+.pill-link {
+  cursor: pointer;
+}
+.pill-link:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .up {
   color: var(--danger);
 }
 .down {
-  color: var(--accent);
+  color: var(--positive);
 }
 
 .banner {
@@ -871,7 +923,7 @@ tbody tr:last-child td {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 28%);
+  box-shadow: var(--shadow-lg);
 }
 
 .chart-wrap {

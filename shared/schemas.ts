@@ -99,6 +99,8 @@ export const billQuerySchema = z.object({
   from: isoDate.optional(),
   to: isoDate.optional(),
   shop: z.string().trim().max(100).optional(),
+  categoryId: z.coerce.number().int().positive().optional(),
+  paymentMethod: z.enum(PAYMENT_METHODS).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -112,10 +114,15 @@ export const spendQuerySchema = z.object({
   from: isoDate.optional(),
   to: isoDate.optional(),
   groupBy: z.enum(SPEND_GROUPINGS).default("month"),
+  categoryId: z.coerce.number().int().positive().optional(),
 });
 
 export const priceHistoryQuerySchema = z.object({
   itemId: z.coerce.number().int().positive(),
+});
+
+export const priceHistoryByNameQuerySchema = z.object({
+  name: trimmed(120).min(1, "Item name is required"),
 });
 
 export const topItemsQuerySchema = z.object({

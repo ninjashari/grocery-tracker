@@ -1,12 +1,35 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
+import { monthRange } from "../lib/dateRange.ts";
 import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead, Segmented } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
 import type { SpendGrouping } from "@shared/schemas.ts";
-import type { SpendReport, TopItem } from "@shared/types.ts";
+import type { Category, SpendBucket, SpendReport, TopItem } from "@shared/types.ts";
+
+/** Builds the click-through target for a spend bucket row, or null when there's nowhere
+ * sensible to link (e.g. "Uncategorised" has no categoryId). */
+function bucketLink(
+  groupBy: SpendGrouping,
+  bucket: SpendBucket,
+  categoryIdByName: Map<string, number>,
+): string | null {
+  if (groupBy === "shop") return `/bills?shop=${encodeURIComponent(bucket.key)}`;
+  if (groupBy === "paymentMethod") return `/bills?paymentMethod=${bucket.key}`;
+  if (groupBy === "category") {
+    const id = categoryIdByName.get(bucket.key);
+    return id !== undefined ? `/items?categoryId=${id}` : null;
+  }
+  if (groupBy === "month") {
+    // bucket.key is the raw "YYYY-MM"; bucket.label is a formatted display string like
+    // "Sep 2026" — the range must be built from key, never label.
+    const { from, to } = monthRange(bucket.key);
+    return `/bills?from=${from}&to=${to}`;
+  }
+  return null;
+}
 
 const GROUPINGS: { value: SpendGrouping; label: string }[] = [
   { value: "month", label: "Month" },
@@ -30,10 +53,14 @@ export function Reports() {
 
   const [spend, setSpend] = useState<SpendReport | null>(null);
   const [top, setTop] = useState<TopItem[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const accent = useMemo(() => cssVar("--accent", "#1f6f43"), []);
+  const categoryIdByName = useMemo(() => new Map(categories.map((c) => [c.name, c.id])), [categories]);
+
+  const accent = useMemo(() => cssVar("--accent", "#2563eb"), []);
+  const accent2 = useMemo(() => cssVar("--accent-2", "#7c3aed"), []);
   // Narrow phones need the Y-axis to give up width, and shop-name-length axis labels to
   // rotate even when there are only a few of them (the data-length check alone misses that).
   const isPhone = useMediaQuery("(max-width: 640px)");
@@ -51,6 +78,10 @@ export function Reports() {
   }, [from, to, groupBy, metric]);
 
   useEffect(load, [load]);
+
+  useEffect(() => {
+    api.categories().then(setCategories).catch(() => {});
+  }, []);
 
   const spendData = (spend?.buckets ?? []).map((bucket) => ({
     label: bucket.label,
@@ -106,6 +137,12 @@ export function Reports() {
               <div className="chart-wrap">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={spendData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+                    <defs>
+                      <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={accent2} />
+                        <stop offset="100%" stopColor={accent} stopOpacity={0.85} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis
                       dataKey="label"
@@ -131,7 +168,7 @@ export function Reports() {
                         color: cssVar("--text", "#000"),
                       }}
                     />
-                    <Bar dataKey="rupees" fill={accent} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="rupees" fill="url(#barFill)" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -148,9 +185,13 @@ export function Reports() {
                     </tr>
                   </thead>
                   <tbody>
-                    {spend!.buckets.map((bucket) => (
+                    {spend!.buckets.map((bucket) => {
+                      const link = bucketLink(groupBy, bucket, categoryIdByName);
+                      return (
                       <tr key={bucket.key}>
-                        <td className="cell-title">{bucket.label}</td>
+                        <td className="cell-title">
+                          {link ? <Link to={link}>{bucket.label}</Link> : bucket.label}
+                        </td>
                         <td className="num-cell" data-label="Bills">
                           {bucket.billCount}
                         </td>
@@ -166,7 +207,8 @@ export function Reports() {
                             : "—"}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -220,7 +262,17 @@ export function Reports() {
                       {item.brand && <span className="faint"> · {item.brand}</span>}
                     </td>
                     <td className="small muted" data-label="Category">
-                      {item.categoryName ?? "Uncategorised"}
+                      {item.categoryName && categoryIdByName.get(item.categoryName) !== undefined ? (
+                        <Link
+                          to={`/items?categoryId=${categoryIdByName.get(item.categoryName)}`}
+                          className="pill pill-link"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {item.categoryName}
+                        </Link>
+                      ) : (
+                        (item.categoryName ?? "Uncategorised")
+                      )}
                     </td>
                     <td className="num-cell" data-label="Times bought">
                       {item.purchaseCount}

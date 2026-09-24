@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
@@ -23,7 +23,8 @@ export function PriceHistory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const accent = useMemo(() => cssVar("--accent", "#1f6f43"), []);
+  const accent = useMemo(() => cssVar("--accent", "#2563eb"), []);
+  const accentTeal = useMemo(() => cssVar("--accent-teal", "#0d9488"), []);
   const isPhone = useMediaQuery("(max-width: 640px)");
 
   // Populates the item picker — only items with enough purchases to show a trend.
@@ -129,6 +130,12 @@ export function PriceHistory() {
               <div className="chart-wrap">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={historyData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+                    <defs>
+                      <linearGradient id="lineStroke" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor={accent} />
+                        <stop offset="100%" stopColor={accentTeal} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="date" tickLine={false} axisLine={false} />
                     <YAxis
@@ -154,7 +161,7 @@ export function PriceHistory() {
                     <Line
                       type="monotone"
                       dataKey="rupees"
-                      stroke={accent}
+                      stroke="url(#lineStroke)"
                       strokeWidth={2}
                       dot={{ r: 4, fill: accent }}
                       activeDot={{ r: 6 }}
@@ -181,8 +188,12 @@ export function PriceHistory() {
                       const delta = previous ? point.basePricePaise - previous.basePricePaise : null;
                       return (
                         <tr key={`${point.billId}-${index}`}>
-                          <td className="mono small cell-title">{point.billDate}</td>
-                          <td data-label="Shop">{point.shop}</td>
+                          <td className="mono small cell-title">
+                            <Link to={`/bills/${point.billId}/edit`}>{point.billDate}</Link>
+                          </td>
+                          <td data-label="Shop">
+                            <Link to={`/bills?shop=${encodeURIComponent(point.shop)}`}>{point.shop}</Link>
+                          </td>
                           <td className="num-cell mono" data-label="Bought">
                             {point.quantity} {point.unit}
                           </td>

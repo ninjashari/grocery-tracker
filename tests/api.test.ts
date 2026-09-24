@@ -224,6 +224,33 @@ describe("bills", () => {
     expect(rows[1]).toMatchObject({ billDate: "2026-09-08", shop: "DMart", quantity: 2, unit: "L" });
   });
 
+  it("filters bills by payment method and by category without corrupting bill totals", async () => {
+    const call = client();
+    await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
+
+    const categories = await call("GET", "/api/categories");
+    const dairy = (categories.data as { id: number; name: string }[]).find((c) => c.name === "Dairy")!;
+
+    const upiBills = await call("GET", "/api/bills?paymentMethod=UPI");
+    expect((upiBills.data as { shop: string }[]).map((b) => b.shop)).toEqual(["DMart"]);
+
+    const cashBills = await call("GET", "/api/bills?paymentMethod=Cash");
+    expect((cashBills.data as { shop: string }[]).map((b) => b.shop).sort()).toEqual(["Local Kirana", "Rounding Mart"]);
+
+    // DMart and Local Kirana both have a Dairy (Milk) line; Rounding Mart doesn't.
+    const dairyBills = await call("GET", `/api/bills?categoryId=${dairy.id}`);
+    const dairyShops = (dairyBills.data as { shop: string }[]).map((b) => b.shop).sort();
+    expect(dairyShops).toEqual(["DMart", "Local Kirana"]);
+
+    // The category filter must narrow which bills qualify without shrinking a qualifying
+    // bill's own total down to just its matching lines — DMart's Tomato line is
+    // Uncategorised, so a broken filter would report only the Milk line's total here.
+    const dmart = (dairyBills.data as { shop: string; computedTotalPaise: number }[]).find(
+      (b) => b.shop === "DMart",
+    )!;
+    expect(dmart.computedTotalPaise).toBe(R(192));
+  });
+
   it("reconciles spend reports against the bills that feed them", async () => {
     const call = client();
     await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });

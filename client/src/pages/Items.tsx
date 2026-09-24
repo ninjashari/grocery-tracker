@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiRequestError } from "../api.ts";
 import { Card, Empty, ErrorBanner, Loading, Modal, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
@@ -11,8 +11,21 @@ export function Items() {
   const [items, setItems] = useState<Item[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [query, setQuery] = useState("");
-  const [categoryId, setCategoryId] = useState("");
   const [includeArchived, setIncludeArchived] = useState(false);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const categoryId = searchParams.get("categoryId") ?? "";
+  function setCategoryId(value: string) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set("categoryId", value);
+        else next.delete("categoryId");
+        return next;
+      },
+      { replace: true },
+    );
+  }
   const [editing, setEditing] = useState<Item | "new" | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -152,7 +165,17 @@ export function Items() {
                       {item.archived && <span className="pill" style={{ marginLeft: 8 }}>archived</span>}
                     </td>
                     <td className="small muted" data-label="Category">
-                      {item.categoryName ?? "Uncategorised"}
+                      {item.categoryId !== null ? (
+                        <Link
+                          to={`/items?categoryId=${item.categoryId}`}
+                          className="pill pill-link"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {item.categoryName}
+                        </Link>
+                      ) : (
+                        "Uncategorised"
+                      )}
                     </td>
                     <td className="small muted" data-label="Unit">
                       {item.defaultUnit}

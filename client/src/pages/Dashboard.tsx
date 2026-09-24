@@ -1,24 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type Summary } from "../api.ts";
+import { monthRangeQs } from "../lib/dateRange.ts";
 import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
-import type { BillSummary, TopItem } from "@shared/types.ts";
+import type { BillSummary, Category, TopItem } from "@shared/types.ts";
 
 export function Dashboard() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [recent, setRecent] = useState<BillSummary[]>([]);
   const [top, setTop] = useState<TopItem[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const categoryIdByName = useMemo(() => new Map(categories.map((c) => [c.name, c.id])), [categories]);
+
   useEffect(() => {
-    Promise.all([api.summary(), api.bills({ limit: 5 }), api.topItems({ limit: 5 })])
-      .then(([loadedSummary, loadedBills, loadedTop]) => {
+    Promise.all([api.summary(), api.bills({ limit: 5 }), api.topItems({ limit: 5 }), api.categories()])
+      .then(([loadedSummary, loadedBills, loadedTop, loadedCategories]) => {
         setSummary(loadedSummary);
         setRecent(loadedBills);
         setTop(loadedTop);
+        setCategories(loadedCategories);
       })
       .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Could not load the dashboard"))
       .finally(() => setLoading(false));
@@ -44,8 +49,11 @@ export function Dashboard() {
       <ErrorBanner error={error} />
 
       <div className="grid cols-4">
-        <Link to="/reports" className="stat-card-link">
-          <Card>
+        <Link
+          to={summary?.currentMonth ? `/bills?${monthRangeQs(summary.currentMonth.month)}` : "/reports"}
+          className="stat-card-link"
+        >
+          <Card className="stat-card">
             <div className="stat">
               <div className="stat-label">This month</div>
               <div className="stat-value">{formatPaise(summary?.currentMonth?.totalPaise ?? 0)}</div>
@@ -62,8 +70,11 @@ export function Dashboard() {
           </Card>
         </Link>
 
-        <Link to="/reports" className="stat-card-link">
-          <Card>
+        <Link
+          to={summary?.previousMonth ? `/bills?${monthRangeQs(summary.previousMonth.month)}` : "/reports"}
+          className="stat-card-link"
+        >
+          <Card className="stat-card">
             <div className="stat">
               <div className="stat-label">Last month</div>
               <div className="stat-value">{formatPaise(summary?.previousMonth?.totalPaise ?? 0)}</div>
@@ -73,7 +84,7 @@ export function Dashboard() {
         </Link>
 
         <Link to="/bills" className="stat-card-link">
-          <Card>
+          <Card className="stat-card">
             <div className="stat">
               <div className="stat-label">All time</div>
               <div className="stat-value">{formatPaise(summary?.totalPaise ?? 0)}</div>
@@ -85,7 +96,7 @@ export function Dashboard() {
         </Link>
 
         <Link to="/items" className="stat-card-link">
-          <Card>
+          <Card className="stat-card">
             <div className="stat">
               <div className="stat-label">Items tracked</div>
               <div className="stat-value">{summary?.itemCount ?? 0}</div>
@@ -113,10 +124,20 @@ export function Dashboard() {
                   {recent.map((bill) => (
                     <tr key={bill.id} onClick={() => navigate(`/bills/${bill.id}/edit`)}>
                       <td className="cell-title">
-                        <strong>{bill.shop}</strong>
+                        <Link
+                          to={`/bills?shop=${encodeURIComponent(bill.shop)}`}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <strong>{bill.shop}</strong>
+                        </Link>
                         <div className="small faint">
                           {bill.billDate} · {bill.lineCount} item{bill.lineCount === 1 ? "" : "s"} ·{" "}
-                          {bill.paymentMethod}
+                          <Link
+                            to={`/bills?paymentMethod=${bill.paymentMethod}`}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {bill.paymentMethod}
+                          </Link>
                         </div>
                       </td>
                       <td className="num-cell">{formatPaise(bill.computedTotalPaise)}</td>
@@ -149,7 +170,17 @@ export function Dashboard() {
                         <strong>{item.itemName}</strong>
                         {item.brand && <span className="faint"> · {item.brand}</span>}
                         <div className="small faint">
-                          {item.categoryName ?? "Uncategorised"} · bought {item.purchaseCount}×
+                          {item.categoryName && categoryIdByName.get(item.categoryName) !== undefined ? (
+                            <Link
+                              to={`/items?categoryId=${categoryIdByName.get(item.categoryName)}`}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {item.categoryName}
+                            </Link>
+                          ) : (
+                            (item.categoryName ?? "Uncategorised")
+                          )}{" "}
+                          · bought {item.purchaseCount}×
                         </div>
                       </td>
                       <td className="num-cell">{formatPaise(item.totalPaise)}</td>
