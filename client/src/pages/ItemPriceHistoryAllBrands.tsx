@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { PriceHistoryTabs } from "../components/PriceHistoryTabs.tsx";
-import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
+import { Card, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
 import { BASE_PRICE_STEP } from "@shared/units.ts";
-import type { Item, PriceHistory as PriceHistoryData } from "@shared/types.ts";
+import type { Item, PriceHistoryByName } from "@shared/types.ts";
 
 /** Recharts renders into SVG, so chart colours come from CSS variables resolved at runtime. */
 function cssVar(name: string, fallback: string): string {
@@ -15,12 +15,13 @@ function cssVar(name: string, fallback: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
-export function PriceHistory() {
+/** Same item name merged across every brand — "irrespective of brand" — as opposed to
+ * PriceHistory.tsx's per-brand trend for one exact item. */
+export function ItemPriceHistoryAllBrands() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
 
-  const [items, setItems] = useState<Item[]>([]);
-  const [history, setHistory] = useState<PriceHistoryData | null>(null);
+  const [item, setItem] = useState<Item | null>(null);
+  const [history, setHistory] = useState<PriceHistoryByName | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,16 +29,15 @@ export function PriceHistory() {
   const accentTeal = useMemo(() => cssVar("--accent-teal", "#0d9488"), []);
   const isPhone = useMediaQuery("(max-width: 640px)");
 
-  // Populates the item picker — only items with enough purchases to show a trend.
-  useEffect(() => {
-    api.items().then(setItems).catch(() => {});
-  }, []);
-
   useEffect(() => {
     if (!id) return;
     setLoading(true);
     api
-      .priceHistory(Number(id))
+      .item(Number(id))
+      .then((loadedItem) => {
+        setItem(loadedItem);
+        return api.priceHistoryAllBrands(loadedItem.name);
+      })
       .then(setHistory)
       .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Could not load price history"))
       .finally(() => setLoading(false));
@@ -48,52 +48,28 @@ export function PriceHistory() {
     date: point.billDate,
     rupees: point.basePricePaise / 100,
     shop: point.shop,
+    brand: point.brand,
     detail: `${point.quantity} ${point.unit} @ ${formatPaise(point.unitPricePaise)}/${point.unit}`,
   }));
 
-  const pickableItems = items.filter((item) => item.purchaseCount > 1);
-  const subtitle = history ? (history.item.brand ? `${history.item.brand} ${history.item.name}` : history.item.name) : undefined;
+  const subtitle = history ? `${history.name} · every brand` : undefined;
 
   if (loading && !history) return <Loading />;
 
   return (
     <>
-      <PageHead title="Price history" subtitle={subtitle ?? "How an item's price has moved over time."} />
-
-      {history && <PriceHistoryTabs itemId={history.item.id} categoryId={history.item.categoryId} />}
+      <PageHead title="Price history" subtitle={subtitle ?? "How this item's price has moved across every brand."} />
 
       <ErrorBanner error={error} />
 
-      <Card>
-        <CardHead title="Pick an item">
-          <div style={{ minWidth: 260 }}>
-            <select
-              value={id ?? ""}
-              aria-label="Item"
-              onChange={(event) => {
-                if (event.target.value) navigate(`/items/${event.target.value}/price-history`);
-              }}
-            >
-              <option value="">Pick an item…</option>
-              {pickableItems.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.brand ? `${item.brand} ${item.name}` : item.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </CardHead>
+      {item && <PriceHistoryTabs itemId={item.id} categoryId={item.categoryId} />}
 
+      <Card>
         <div className="card-body">
-          {!history ? (
-            <Empty title="No item selected">
-              Pick an item to see how its price has moved. Prices are quoted per 100 g / 100 ml / piece, so
-              purchases in different units are directly comparable.
-            </Empty>
-          ) : history.points.length < 2 ? (
+          {!history ? null : history.points.length < 2 ? (
             <Empty title="Not enough purchases yet">
               {history.points.length === 0
-                ? "This item has never been bought."
+                ? "This item has never been bought, under any brand."
                 : "Buy it once more and a trend appears here."}
             </Empty>
           ) : (
@@ -134,7 +110,7 @@ export function PriceHistory() {
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={historyData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
                     <defs>
-                      <linearGradient id="lineStroke" x1="0" y1="0" x2="1" y2="0">
+                      <linearGradient id="allBrandsLineStroke" x1="0" y1="0" x2="1" y2="0">
                         <stop offset="0%" stopColor={accent} />
                         <stop offset="100%" stopColor={accentTeal} />
                       </linearGradient>
@@ -151,8 +127,8 @@ export function PriceHistory() {
                     <Tooltip
                       formatter={(value) => [`₹${Number(value).toFixed(2)} ${stepLabel}`, "Price"]}
                       labelFormatter={(label, payload) => {
-                        const point = payload?.[0]?.payload as { shop?: string; detail?: string } | undefined;
-                        return point ? `${String(label)} · ${point.shop} · ${point.detail}` : label;
+                        const point = payload?.[0]?.payload as { shop?: string; brand?: string; detail?: string } | undefined;
+                        return point ? `${String(label)} · ${point.brand} · ${point.shop} · ${point.detail}` : label;
                       }}
                       contentStyle={{
                         background: cssVar("--surface", "#fff"),
@@ -164,7 +140,7 @@ export function PriceHistory() {
                     <Line
                       type="monotone"
                       dataKey="rupees"
-                      stroke="url(#lineStroke)"
+                      stroke="url(#allBrandsLineStroke)"
                       strokeWidth={2}
                       dot={{ r: 4, fill: accent }}
                       activeDot={{ r: 6 }}
@@ -179,6 +155,7 @@ export function PriceHistory() {
                   <thead>
                     <tr>
                       <th>Date</th>
+                      <th>Brand</th>
                       <th>Shop</th>
                       <th className="num-cell">Bought</th>
                       <th className="num-cell">Paid / unit</th>
@@ -193,6 +170,9 @@ export function PriceHistory() {
                         <tr key={`${point.billId}-${index}`}>
                           <td className="mono small cell-title">
                             <Link to={`/bills/${point.billId}/edit`}>{point.billDate}</Link>
+                          </td>
+                          <td className="small muted" data-label="Brand">
+                            {point.brand || <span className="faint">—</span>}
                           </td>
                           <td data-label="Shop">
                             <Link to={`/bills?shop=${encodeURIComponent(point.shop)}`}>{point.shop}</Link>
