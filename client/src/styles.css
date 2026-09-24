@@ -676,14 +676,46 @@ tbody tr:last-child td {
 }
 
 /* Layered on top of the plain .pill so Part B's clickable category/payment badges start
-   visually identical to today's static pills, only signalling interactivity on hover. */
+   visually identical to today's static pills, only signalling interactivity on hover.
+   text-decoration is reset here (rather than on .pill) since .pill alone is also used
+   on plain, non-link <span> tags that were never underlined to begin with. */
 .pill-link {
   cursor: pointer;
+  text-decoration: none;
 }
 .pill-link:hover {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* A <Link> styled as a bordered box instead of plain underlined text — for links that
+   are the main tappable content of their row (a bill's date/shop, a report bucket's
+   label) or a standalone shortcut ("View all"). Distinct from .pill, which stays for
+   compact tag-style metadata (category/payment/month badges next to other text).
+   Sizing bumps up further on phones, see the 640px breakpoint below. */
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.link-chip:hover {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.link-chip.small {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.85rem;
 }
 
 .up {
@@ -1024,6 +1056,22 @@ tbody tr:last-child td {
 
   main {
     padding: 1rem 0.85rem 3rem;
+  }
+
+  /* ---- link-styled boxes: bigger touch targets than their desktop size ---- */
+  .pill-link {
+    padding: 0.4rem 0.7rem;
+    min-height: 36px;
+  }
+
+  .link-chip {
+    min-height: 44px;
+    padding: 0.6rem 0.9rem;
+  }
+
+  .link-chip.small {
+    min-height: 40px;
+    padding: 0.45rem 0.7rem;
   }
 
   /* ---- forms: predictable single-column stacking instead of flex-wrap math --- */

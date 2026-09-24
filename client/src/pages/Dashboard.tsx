@@ -109,14 +109,17 @@ export function Dashboard() {
       <div className="grid cols-2" style={{ marginTop: "1.25rem" }}>
         <Card>
           <CardHead title="Recent bills">
-            <Link to="/bills" className="small">
+            <Link to="/bills" className="link-chip small">
               View all
             </Link>
           </CardHead>
           <div className="card-body tight table-wrap">
             {recent.length === 0 ? (
               <Empty title="No bills yet">
-                <Link to="/new">Add your first bill</Link> to start tracking.
+                <Link to="/new" className="link-chip small">
+                  Add your first bill
+                </Link>{" "}
+                to start tracking.
               </Empty>
             ) : (
               <table className="row-hover row-link">
@@ -126,6 +129,7 @@ export function Dashboard() {
                       <td className="cell-title">
                         <Link
                           to={`/bills?shop=${encodeURIComponent(bill.shop)}`}
+                          className="link-chip small"
                           onClick={(event) => event.stopPropagation()}
                         >
                           <strong>{bill.shop}</strong>
@@ -134,6 +138,7 @@ export function Dashboard() {
                           {bill.billDate} · {bill.lineCount} item{bill.lineCount === 1 ? "" : "s"} ·{" "}
                           <Link
                             to={`/bills?paymentMethod=${bill.paymentMethod}`}
+                            className="pill pill-link"
                             onClick={(event) => event.stopPropagation()}
                           >
                             {bill.paymentMethod}
@@ -151,7 +156,7 @@ export function Dashboard() {
 
         <Card>
           <CardHead title="Top items by spend">
-            <Link to="/reports" className="small">
+            <Link to="/reports" className="link-chip small">
               Reports
             </Link>
           </CardHead>
@@ -173,6 +178,7 @@ export function Dashboard() {
                           {item.categoryName && categoryIdByName.get(item.categoryName) !== undefined ? (
                             <Link
                               to={`/items?categoryId=${categoryIdByName.get(item.categoryName)}`}
+                              className="pill pill-link"
                               onClick={(event) => event.stopPropagation()}
                             >
                               {item.categoryName}

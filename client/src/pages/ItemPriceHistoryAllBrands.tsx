@@ -169,13 +169,17 @@ export function ItemPriceHistoryAllBrands() {
                       return (
                         <tr key={`${point.billId}-${index}`}>
                           <td className="mono small cell-title">
-                            <Link to={`/bills/${point.billId}/edit`}>{point.billDate}</Link>
+                            <Link to={`/bills/${point.billId}/edit`} className="link-chip small">
+                              {point.billDate}
+                            </Link>
                           </td>
                           <td className="small muted" data-label="Brand">
                             {point.brand || <span className="faint">—</span>}
                           </td>
                           <td data-label="Shop">
-                            <Link to={`/bills?shop=${encodeURIComponent(point.shop)}`}>{point.shop}</Link>
+                            <Link to={`/bills?shop=${encodeURIComponent(point.shop)}`} className="link-chip small">
+                              {point.shop}
+                            </Link>
                           </td>
                           <td className="num-cell mono" data-label="Bought">
                             {point.quantity} {point.unit}
