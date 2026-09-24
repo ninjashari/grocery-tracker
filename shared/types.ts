@@ -94,6 +94,22 @@ export type PricePoint = {
   basePricePaise: number;
 };
 
+/** One raw purchase of an item — a plain ledger row, unlike PricePoint's aggregated view. */
+export type ItemPurchase = {
+  billId: number;
+  billDate: string;
+  shop: string;
+  paymentMethod: PaymentMethod;
+  note: string;
+  statedTotalPaise: number | null;
+  quantity: number;
+  unit: Unit;
+  unitPricePaise: number;
+  lineTotalPaise: number;
+  baseQuantity: number;
+  baseUnit: BaseUnit;
+};
+
 export type PriceHistory = {
   item: Item;
   baseUnit: BaseUnit | null;

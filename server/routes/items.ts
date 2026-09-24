@@ -11,6 +11,7 @@ import {
   listItems,
   requireItem,
 } from "../lib/items.ts";
+import { listBillLinesForItem } from "../lib/bills.ts";
 import { itemCreateSchema, itemUpdateSchema } from "../../shared/schemas.ts";
 
 export const itemsRouter = Router();
@@ -58,6 +59,18 @@ itemsRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
     res.json(await requireItem(getDb(), auth(req).householdId, Number(req.params.id)));
+  }),
+);
+
+/** Every purchase of this item across all bills, newest first. */
+itemsRouter.get(
+  "/:id/bills",
+  asyncHandler(async (req, res) => {
+    const { householdId } = auth(req);
+    const id = Number(req.params.id);
+    const db = getDb();
+    await requireItem(db, householdId, id);
+    res.json(await listBillLinesForItem(db, householdId, id));
   }),
 );
 

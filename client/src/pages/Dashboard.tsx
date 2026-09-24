@@ -143,7 +143,7 @@ export function Dashboard() {
                   {top.map((item) => (
                     <tr
                       key={`${item.itemId}-${item.baseUnit}`}
-                      onClick={() => navigate(`/reports?itemId=${item.itemId}`)}
+                      onClick={() => navigate(`/items/${item.itemId}/price-history`)}
                     >
                       <td className="cell-title">
                         <strong>{item.itemName}</strong>

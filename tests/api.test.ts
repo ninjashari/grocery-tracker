@@ -207,6 +207,23 @@ describe("bills", () => {
     expect(history.data["changeVsFirstPct"]).toBe(0);
   });
 
+  it("returns every purchase of an item as a raw ledger, newest first", async () => {
+    const call = client();
+    await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
+
+    const items = await call("GET", "/api/items?q=Milk");
+    const milk = (items.data as { id: number }[])[0]!;
+
+    const purchases = await call("GET", `/api/items/${milk.id}/bills`);
+    const rows = purchases.data as { billDate: string; shop: string; quantity: number; unit: string }[];
+
+    // Two purchases exist for Milk by this point: DMart on 2026-09-08 (2 L) and Local
+    // Kirana on 2026-09-20 (500 ml, from the price-history test above) — newest first.
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ billDate: "2026-09-20", shop: "Local Kirana", quantity: 500, unit: "ml" });
+    expect(rows[1]).toMatchObject({ billDate: "2026-09-08", shop: "DMart", quantity: 2, unit: "L" });
+  });
+
   it("reconciles spend reports against the bills that feed them", async () => {
     const call = client();
     await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
@@ -245,6 +262,7 @@ describe("household isolation", () => {
     expect((await stranger("GET", "/api/items")).data).toEqual([]);
     expect((await stranger("GET", `/api/bills/${ownerBillId}`)).status).toBe(404);
     expect((await stranger("GET", `/api/items/${ownerItemId}`)).status).toBe(404);
+    expect((await stranger("GET", `/api/items/${ownerItemId}/bills`)).status).toBe(404);
 
     // An item id smuggled in from another household must not be accepted on a bill line.
     const smuggled = await stranger("POST", "/api/bills", {

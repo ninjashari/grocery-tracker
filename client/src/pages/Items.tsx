@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, ApiRequestError } from "../api.ts";
 import { Card, Empty, ErrorBanner, Loading, Modal, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
@@ -7,6 +7,7 @@ import { UNITS, type Unit } from "@shared/units.ts";
 import type { Category, Item } from "@shared/types.ts";
 
 export function Items() {
+  const navigate = useNavigate();
   const [items, setItems] = useState<Item[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [query, setQuery] = useState("");
@@ -127,7 +128,7 @@ export function Items() {
               .
             </Empty>
           ) : (
-            <table className="row-hover">
+            <table className="row-hover row-link">
               <thead>
                 <tr>
                   <th>Item</th>
@@ -140,7 +141,11 @@ export function Items() {
               </thead>
               <tbody>
                 {items.map((item) => (
-                  <tr key={item.id} style={item.archived ? { opacity: 0.6 } : undefined}>
+                  <tr
+                    key={item.id}
+                    style={item.archived ? { opacity: 0.6 } : undefined}
+                    onClick={() => navigate(`/items/${item.id}/bills`)}
+                  >
                     <td className="cell-title">
                       <strong>{item.name}</strong>
                       {item.brand && <span className="faint"> · {item.brand}</span>}
@@ -171,19 +176,44 @@ export function Items() {
                     <td className="cell-actions">
                       <div className="button-row">
                         {item.purchaseCount > 1 && (
-                          <Link to={`/reports?itemId=${item.id}`} className="small">
+                          <Link
+                            to={`/items/${item.id}/price-history`}
+                            className="small"
+                            onClick={(event) => event.stopPropagation()}
+                          >
                             Price history
                           </Link>
                         )}
-                        <button type="button" className="ghost small" onClick={() => setEditing(item)}>
+                        <button
+                          type="button"
+                          className="ghost small"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setEditing(item);
+                          }}
+                        >
                           Edit
                         </button>
                         {item.archived ? (
-                          <button type="button" className="ghost small" onClick={() => void unarchive(item)}>
+                          <button
+                            type="button"
+                            className="ghost small"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void unarchive(item);
+                            }}
+                          >
                             Restore
                           </button>
                         ) : (
-                          <button type="button" className="danger small" onClick={() => void remove(item)}>
+                          <button
+                            type="button"
+                            className="danger small"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void remove(item);
+                            }}
+                          >
                             Delete
                           </button>
                         )}

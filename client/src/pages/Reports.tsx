@@ -1,24 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Scatter,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useNavigate } from "react-router-dom";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead, Segmented } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
-import { BASE_PRICE_STEP } from "@shared/units.ts";
 import type { SpendGrouping } from "@shared/schemas.ts";
-import type { Item, PriceHistory, SpendReport, TopItem } from "@shared/types.ts";
+import type { SpendReport, TopItem } from "@shared/types.ts";
 
 const GROUPINGS: { value: SpendGrouping; label: string }[] = [
   { value: "month", label: "Month" },
@@ -34,7 +22,7 @@ function cssVar(name: string, fallback: string): string {
 }
 
 export function Reports() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [groupBy, setGroupBy] = useState<SpendGrouping>("month");
@@ -42,12 +30,8 @@ export function Reports() {
 
   const [spend, setSpend] = useState<SpendReport | null>(null);
   const [top, setTop] = useState<TopItem[]>([]);
-  const [items, setItems] = useState<Item[]>([]);
-  const [history, setHistory] = useState<PriceHistory | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const selectedItemId = searchParams.get("itemId") ?? "";
 
   const accent = useMemo(() => cssVar("--accent", "#1f6f43"), []);
   // Narrow phones need the Y-axis to give up width, and shop-name-length axis labels to
@@ -57,15 +41,10 @@ export function Reports() {
   const load = useCallback(() => {
     setLoading(true);
     const range = { from: from || undefined, to: to || undefined };
-    Promise.all([
-      api.spend({ ...range, groupBy }),
-      api.topItems({ ...range, metric, limit: 15 }),
-      api.items(),
-    ])
-      .then(([loadedSpend, loadedTop, loadedItems]) => {
+    Promise.all([api.spend({ ...range, groupBy }), api.topItems({ ...range, metric, limit: 15 })])
+      .then(([loadedSpend, loadedTop]) => {
         setSpend(loadedSpend);
         setTop(loadedTop);
-        setItems(loadedItems);
       })
       .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Could not load reports"))
       .finally(() => setLoading(false));
@@ -73,33 +52,10 @@ export function Reports() {
 
   useEffect(load, [load]);
 
-  useEffect(() => {
-    if (!selectedItemId) {
-      setHistory(null);
-      return;
-    }
-    let cancelled = false;
-    api
-      .priceHistory(Number(selectedItemId))
-      .then((result) => !cancelled && setHistory(result))
-      .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Could not load price history"));
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedItemId]);
-
   const spendData = (spend?.buckets ?? []).map((bucket) => ({
     label: bucket.label,
     rupees: bucket.totalPaise / 100,
     totalPaise: bucket.totalPaise,
-  }));
-
-  const stepLabel = history?.baseUnit ? BASE_PRICE_STEP[history.baseUnit].label : "";
-  const historyData = (history?.points ?? []).map((point) => ({
-    date: point.billDate,
-    rupees: point.basePricePaise / 100,
-    shop: point.shop,
-    detail: `${point.quantity} ${point.unit} @ ${formatPaise(point.unitPricePaise)}/${point.unit}`,
   }));
 
   if (loading && !spend) return <Loading />;
@@ -229,160 +185,6 @@ export function Reports() {
       </Card>
 
       <Card>
-        <CardHead title="Price history">
-          <div style={{ minWidth: 260 }}>
-            <select
-              value={selectedItemId}
-              aria-label="Item"
-              onChange={(event) => {
-                const next = new URLSearchParams(searchParams);
-                if (event.target.value) next.set("itemId", event.target.value);
-                else next.delete("itemId");
-                setSearchParams(next, { replace: true });
-              }}
-            >
-              <option value="">Pick an item…</option>
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.brand ? `${item.brand} ${item.name}` : item.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </CardHead>
-
-        <div className="card-body">
-          {!history ? (
-            <Empty title="No item selected">
-              Pick an item to see how its price has moved. Prices are quoted per 100 g / 100 ml / piece, so
-              purchases in different units are directly comparable.
-            </Empty>
-          ) : history.points.length < 2 ? (
-            <Empty title="Not enough purchases yet">
-              {history.points.length === 0
-                ? "This item has never been bought."
-                : "Buy it once more and a trend appears here."}
-            </Empty>
-          ) : (
-            <>
-              <div className="grid cols-4" style={{ marginBottom: "1rem" }}>
-                <div className="stat" style={{ padding: 0 }}>
-                  <div className="stat-label">Latest</div>
-                  <div className="stat-value">{formatPaise(Math.round(history.latestBasePricePaise!))}</div>
-                  <div className="stat-note faint">{stepLabel}</div>
-                </div>
-                <div className="stat" style={{ padding: 0 }}>
-                  <div className="stat-label">First recorded</div>
-                  <div className="stat-value">{formatPaise(Math.round(history.firstBasePricePaise!))}</div>
-                  <div className="stat-note faint">{history.points[0]!.billDate}</div>
-                </div>
-                <div className="stat" style={{ padding: 0 }}>
-                  <div className="stat-label">vs first</div>
-                  <div className={`stat-value ${history.changeVsFirstPct! > 0 ? "up" : "down"}`}>
-                    {history.changeVsFirstPct! > 0 ? "+" : ""}
-                    {history.changeVsFirstPct!.toFixed(1)}%
-                  </div>
-                </div>
-                <div className="stat" style={{ padding: 0 }}>
-                  <div className="stat-label">vs previous buy</div>
-                  <div
-                    className={`stat-value ${
-                      history.changeVsPreviousPct === null ? "" : history.changeVsPreviousPct > 0 ? "up" : "down"
-                    }`}
-                  >
-                    {history.changeVsPreviousPct === null
-                      ? "—"
-                      : `${history.changeVsPreviousPct > 0 ? "+" : ""}${history.changeVsPreviousPct.toFixed(1)}%`}
-                  </div>
-                </div>
-              </div>
-
-              <div className="chart-wrap">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={historyData} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="date" tickLine={false} axisLine={false} />
-                    <YAxis
-                      tickLine={false}
-                      axisLine={false}
-                      width={isPhone ? 44 : 70}
-                      domain={["auto", "auto"]}
-                      tickFormatter={(value: number) => `₹${value.toFixed(2)}`}
-                    />
-                    <Tooltip
-                      formatter={(value) => [`₹${Number(value).toFixed(2)} ${stepLabel}`, "Price"]}
-                      labelFormatter={(label, payload) => {
-                        const point = payload?.[0]?.payload as { shop?: string; detail?: string } | undefined;
-                        return point ? `${String(label)} · ${point.shop} · ${point.detail}` : label;
-                      }}
-                      contentStyle={{
-                        background: cssVar("--surface", "#fff"),
-                        border: `1px solid ${cssVar("--border", "#ddd")}`,
-                        borderRadius: 8,
-                        color: cssVar("--text", "#000"),
-                      }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="rupees"
-                      stroke={accent}
-                      strokeWidth={2}
-                      dot={{ r: 4, fill: accent }}
-                      activeDot={{ r: 6 }}
-                    />
-                    <Scatter dataKey="rupees" fill={accent} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="table-wrap" style={{ marginTop: "1rem" }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Shop</th>
-                      <th className="num-cell">Bought</th>
-                      <th className="num-cell">Paid / unit</th>
-                      <th className="num-cell">Price {stepLabel}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {history.points.map((point, index) => {
-                      const previous = history.points[index - 1];
-                      const delta = previous ? point.basePricePaise - previous.basePricePaise : null;
-                      return (
-                        <tr key={`${point.billId}-${index}`}>
-                          <td className="mono small cell-title">{point.billDate}</td>
-                          <td data-label="Shop">{point.shop}</td>
-                          <td className="num-cell mono" data-label="Bought">
-                            {point.quantity} {point.unit}
-                          </td>
-                          <td className="num-cell mono" data-label="Paid / unit">
-                            {formatPaise(point.unitPricePaise)}/{point.unit}
-                          </td>
-                          <td className="num-cell mono" data-label={`Price ${stepLabel}`}>
-                            {/* One wrapper so this cell is a single flex item on mobile. */}
-                            <div>
-                              {formatPaise(Math.round(point.basePricePaise))}
-                              {delta !== null && delta !== 0 && (
-                                <span className={delta > 0 ? "up" : "down"} style={{ marginLeft: 6 }}>
-                                  {delta > 0 ? "▲" : "▼"}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </div>
-      </Card>
-
-      <Card>
         <CardHead title="Top items">
           <Segmented
             value={metric}
@@ -397,7 +199,7 @@ export function Reports() {
           {top.length === 0 ? (
             <Empty title="Nothing in this range" />
           ) : (
-            <table className="row-hover">
+            <table className="row-hover row-link">
               <thead>
                 <tr>
                   <th>Item</th>
@@ -409,7 +211,10 @@ export function Reports() {
               </thead>
               <tbody>
                 {top.map((item) => (
-                  <tr key={`${item.itemId}-${item.baseUnit}`}>
+                  <tr
+                    key={`${item.itemId}-${item.baseUnit}`}
+                    onClick={() => navigate(`/items/${item.itemId}/price-history`)}
+                  >
                     <td className="cell-title">
                       <strong>{item.itemName}</strong>
                       {item.brand && <span className="faint"> · {item.brand}</span>}

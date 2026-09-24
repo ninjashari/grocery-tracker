@@ -6,6 +6,7 @@ import type {
   ImportPreview,
   ImportResult,
   Item,
+  ItemPurchase,
   PriceHistory,
   SpendReport,
   TopItem,
@@ -113,6 +114,7 @@ export const api = {
     request<Item>(`/items/${id}`, { method: "PATCH", body }),
   deleteItem: (id: number) => request<{ archived: true; item: Item } | void>(`/items/${id}`, { method: "DELETE" }),
   shops: () => request<Shop[]>("/items/shops"),
+  itemBills: (itemId: number) => request<ItemPurchase[]>(`/items/${itemId}/bills`),
 
   bills: (params: { from?: string; to?: string; shop?: string; limit?: number; offset?: number } = {}) =>
     request<BillSummary[]>(`/bills${qs(params)}`),

@@ -6,7 +6,7 @@ import { findOrCreateItem } from "./items.ts";
 import { toBaseQuantity } from "../../shared/units.ts";
 import { derivedUnitPricePaise } from "../../shared/money.ts";
 import type { BillInput } from "../../shared/schemas.ts";
-import type { Bill, BillLine, BillSummary } from "../../shared/types.ts";
+import type { Bill, BillLine, BillSummary, ItemPurchase } from "../../shared/types.ts";
 
 const billSummaryColumns = {
   id: bills.id,
@@ -40,6 +40,36 @@ export async function listBills(executor: Executor, householdId: number, filter:
     .offset(filter.offset);
 
   return rows as unknown as BillSummary[];
+}
+
+/** Every purchase of one item across all bills, newest first — a raw ledger, not the
+ * aggregated price-trend view reports/price-history returns. */
+export async function listBillLinesForItem(
+  executor: Executor,
+  householdId: number,
+  itemId: number,
+): Promise<ItemPurchase[]> {
+  const rows = await executor
+    .select({
+      billId: bills.id,
+      billDate: bills.billDate,
+      shop: bills.shop,
+      paymentMethod: bills.paymentMethod,
+      note: bills.note,
+      statedTotalPaise: bills.statedTotalPaise,
+      quantity: billLines.quantity,
+      unit: billLines.unit,
+      unitPricePaise: billLines.unitPricePaise,
+      lineTotalPaise: billLines.lineTotalPaise,
+      baseQuantity: billLines.baseQuantity,
+      baseUnit: billLines.baseUnit,
+    })
+    .from(billLines)
+    .innerJoin(bills, eq(bills.id, billLines.billId))
+    .where(and(eq(billLines.itemId, itemId), eq(bills.householdId, householdId)))
+    .orderBy(sql`${bills.billDate} DESC`, sql`${billLines.id} DESC`);
+
+  return rows as unknown as ItemPurchase[];
 }
 
 export async function getBillLines(executor: Executor, billId: number): Promise<BillLine[]> {
