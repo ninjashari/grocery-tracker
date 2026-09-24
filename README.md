@@ -2,16 +2,69 @@
 
 Log each day's grocery bill, keep a catalog of what you buy, and see where the money goes.
 
+![Dashboard](docs/screenshots/dashboard.png)
+
 - **Item catalog** — brand, name, category, usual unit. Items are created inline while
   entering a bill, so entry never has to stop.
 - **Bill entry** — date, shop, payment method and the printed total, plus one line per
-  item (quantity, unit, price per unit). Line totals are computed.
-- **Reports** — spend by month / category / shop / payment method, per-item price history,
-  and top items by spend or quantity.
+  item (quantity, unit, price per unit). Line totals are computed, and the item field
+  autocompletes against your existing catalog.
+- **Reports** — spend by month / category / shop / payment method, and top items by spend
+  or quantity.
+- **Price history, three ways** — one brand's price trend, that item's name merged across
+  every brand, and a whole category's total spend over time, all cross-linked.
+- **Click-to-filter everywhere** — category badges, shop names, payment-method pills and
+  month labels are links that jump straight into a filtered view.
 - **CSV import & export** — round-trippable, with a dry-run preview before anything is written.
 - **Households** — several people share one dataset; each account signs in separately.
+- **Light and dark themes**, following the system by default.
 
 Currency is INR (₹) and units are metric: kg, g, L, ml, pcs, pack, dozen.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/new-bill.png" alt="New bill entry with item autocomplete" />
+      <br /><sub>Entering a bill — item search shows the last price paid under each brand.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/bills.png" alt="Bills list with filters" />
+      <br /><sub>Bills, filterable by date, shop, category and payment method.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/items.png" alt="Item catalog" />
+      <br /><sub>The item catalog, with each item's last price and purchase count.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/reports.png" alt="Spend reports" />
+      <br /><sub>Spend by month, category, shop or payment method.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/price-history.png" alt="Price history for one brand" />
+      <br /><sub>Price history for one item and brand, quoted per 100 g/ml/pc.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/price-history-all-brands.png" alt="Price history merged across brands" />
+      <br /><sub>The same item's price merged across every brand it's sold under.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/category-spend-history.png" alt="Category spend over time" />
+      <br /><sub>A category's total spend over time — cross-linked from either price view.</sub>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/dashboard-dark.png" alt="Dashboard in dark mode" />
+      <br /><sub>Dark mode, following the system by default.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Requirements
 
@@ -63,6 +116,9 @@ Every line is also stored in a base unit (mass → g, volume → ml, count → p
 what makes price history trustworthy: 1 kg at ₹60 and 500 g at ₹30 are the same rate, so
 they land on the same curve. Price history is quoted per 100 g, per 100 ml or per piece.
 
+A category mixes incompatible units (kg, L, pcs), so there's no single per-unit rate to
+chart there — a category's trend is its total spend over time instead, not a price.
+
 Money is stored as integer paise throughout — never as a float.
 
 ## CSV format
@@ -90,6 +146,7 @@ server/     Express API; routes/ per resource, lib/ for the logic they share
   db/       Drizzle ORM: connection, schema.ts (source of truth), category seed
 client/     React app; pages/ per screen, components/ for shared UI
 tests/      vitest — unit tests for shared/, integration tests against the real API
+docs/       screenshots used in this README
 ```
 
 ## Commands
