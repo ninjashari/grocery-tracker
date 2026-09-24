@@ -3,32 +3,24 @@ import { Link, useNavigate } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
-import { monthRange } from "../lib/dateRange.ts";
+import { SpendByMonthChart } from "../components/SpendByMonthChart.tsx";
 import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead, Segmented } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
 import type { SpendGrouping } from "@shared/schemas.ts";
 import type { Category, SpendBucket, SpendReport, TopItem } from "@shared/types.ts";
 
 /** Builds the click-through target for a spend bucket row, or null when there's nowhere
- * sensible to link (e.g. "Uncategorised" has no categoryId). */
+ * sensible to link (e.g. "Uncategorised" has no categoryId). Never called for "month" —
+ * that grouping renders via SpendByMonthChart, which links its own month buckets. */
 function bucketLink(
-  groupBy: SpendGrouping,
+  groupBy: Exclude<SpendGrouping, "month">,
   bucket: SpendBucket,
   categoryIdByName: Map<string, number>,
 ): string | null {
   if (groupBy === "shop") return `/bills?shop=${encodeURIComponent(bucket.key)}`;
   if (groupBy === "paymentMethod") return `/bills?paymentMethod=${bucket.key}`;
-  if (groupBy === "category") {
-    const id = categoryIdByName.get(bucket.key);
-    return id !== undefined ? `/items?categoryId=${id}` : null;
-  }
-  if (groupBy === "month") {
-    // bucket.key is the raw "YYYY-MM"; bucket.label is a formatted display string like
-    // "Sep 2026" — the range must be built from key, never label.
-    const { from, to } = monthRange(bucket.key);
-    return `/bills?from=${from}&to=${to}`;
-  }
-  return null;
+  const id = categoryIdByName.get(bucket.key);
+  return id !== undefined ? `/items?categoryId=${id}` : null;
 }
 
 const GROUPINGS: { value: SpendGrouping; label: string }[] = [
@@ -130,7 +122,9 @@ export function Reports() {
         </CardHead>
 
         <div className="card-body">
-          {spendData.length === 0 ? (
+          {groupBy === "month" ? (
+            <SpendByMonthChart buckets={spend?.buckets ?? []} totalPaise={spend?.totalPaise ?? 0} />
+          ) : spendData.length === 0 ? (
             <Empty title="Nothing in this range">Add bills or widen the date range.</Empty>
           ) : (
             <>

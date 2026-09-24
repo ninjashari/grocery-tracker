@@ -266,6 +266,59 @@ describe("bills", () => {
       expect(report.data["totalPaise"], `grouped by ${groupBy}`).toBe(expected);
     }
   });
+
+  it("merges price history across brands by item name, case-insensitively", async () => {
+    const call = client();
+    await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
+
+    const categories = await call("GET", "/api/categories");
+    const dairy = (categories.data as { id: number; name: string }[]).find((c) => c.name === "Dairy")!;
+
+    // Two different brands sharing the exact item name "Paneer" (a fresh name, so this test
+    // doesn't disturb the Milk fixtures other tests rely on) — /price-history-all-brands must
+    // merge them into one trend despite the brand difference.
+    await call("POST", "/api/bills", {
+      billDate: "2026-09-22",
+      shop: "Fresh Mart",
+      paymentMethod: "Cash",
+      lines: [
+        { newItem: { brand: "Amul", name: "Paneer", categoryId: dairy.id, defaultUnit: "kg" }, quantity: 0.2, unit: "kg", lineTotalPaise: R(90) },
+      ],
+    });
+    await call("POST", "/api/bills", {
+      billDate: "2026-09-25",
+      shop: "Fresh Mart",
+      paymentMethod: "Cash",
+      lines: [
+        { newItem: { brand: "Mother Dairy", name: "Paneer", categoryId: dairy.id, defaultUnit: "kg" }, quantity: 0.2, unit: "kg", lineTotalPaise: R(95) },
+      ],
+    });
+
+    // Queried with a different case than stored ("paneer"), to confirm the COLLATE NOCASE match.
+    const merged = await call("GET", "/api/reports/price-history-all-brands?name=paneer");
+    const points = merged.data["points"] as { brand: string; billDate: string }[];
+
+    expect(merged.data["categoryName"]).toBe("Dairy");
+    expect(points.map((p) => p.brand)).toEqual(["Amul", "Mother Dairy"]);
+    expect(points.at(-1)).toMatchObject({ brand: "Mother Dairy", billDate: "2026-09-25" });
+  });
+
+  it("narrows spend buckets by category", async () => {
+    const call = client();
+    await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
+
+    const categories = await call("GET", "/api/categories");
+    const dairy = (categories.data as { id: number; name: string }[]).find((c) => c.name === "Dairy")!;
+
+    // Every Dairy purchase so far: DMart's Milk (R120), Local Kirana's Milk (R30), and the
+    // two Paneer purchases from the merge test above (R90 + R95) — nothing else in this
+    // household is categorised as Dairy.
+    const report = await call("GET", `/api/reports/spend?groupBy=month&categoryId=${dairy.id}`);
+    expect(report.data["totalPaise"]).toBe(R(120) + R(30) + R(90) + R(95));
+
+    const unfiltered = await call("GET", "/api/reports/spend?groupBy=month");
+    expect(unfiltered.data["totalPaise"] as number).toBeGreaterThan(report.data["totalPaise"] as number);
+  });
 });
 
 describe("household isolation", () => {
