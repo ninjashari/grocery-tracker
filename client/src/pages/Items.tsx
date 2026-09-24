@@ -201,7 +201,7 @@ export function Items() {
                         {item.purchaseCount > 1 && (
                           <Link
                             to={`/items/${item.id}/price-history`}
-                            className="link-chip small"
+                            className="link-chip small accent"
                             onClick={(event) => event.stopPropagation()}
                           >
                             Price history

@@ -564,13 +564,20 @@ button.small {
   border-radius: var(--radius-sm);
 }
 
-.segmented button {
+/* .segmented a covers PriceHistoryTabs' NavLinks — without this, an inactive tab had
+   no padding/radius/color of its own and fell back to a bare underlined <a>, same bug
+   the .link-chip/.pill-link work fixed elsewhere: only the .on state was ever styled. */
+.segmented button,
+.segmented a {
   border: none;
   background: transparent;
   padding: 0.3rem 0.65rem;
   font-size: 0.85rem;
   border-radius: 4px;
   color: var(--text-muted);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .segmented button.on,
@@ -716,6 +723,22 @@ tbody tr:last-child td {
 .link-chip.small {
   padding: 0.25rem 0.55rem;
   font-size: 0.85rem;
+}
+
+/* A stronger, accent-colored variant — for a chip that's the one useful action in a
+   row of otherwise-neutral ghost buttons (e.g. "Price history" next to Edit/Delete),
+   where the plain .link-chip border reads as just another gray control and gets
+   overlooked. */
+.link-chip.accent {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.link-chip.accent:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 
 .up {
@@ -1072,6 +1095,14 @@ tbody tr:last-child td {
   .link-chip.small {
     min-height: 40px;
     padding: 0.45rem 0.7rem;
+  }
+
+  .segmented button,
+  .segmented a {
+    padding: 0.55rem 0.75rem;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
   }
 
   /* ---- forms: predictable single-column stacking instead of flex-wrap math --- */
