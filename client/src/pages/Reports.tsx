@@ -184,7 +184,13 @@ export function Reports() {
                       return (
                       <tr key={bucket.key}>
                         <td className="cell-title">
-                          {link ? <Link to={link}>{bucket.label}</Link> : bucket.label}
+                          {link ? (
+                            <Link to={link} className="link-chip small">
+                              {bucket.label}
+                            </Link>
+                          ) : (
+                            bucket.label
+                          )}
                         </td>
                         <td className="num-cell" data-label="Bills">
                           {bucket.billCount}

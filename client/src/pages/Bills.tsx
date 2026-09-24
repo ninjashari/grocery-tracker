@@ -168,7 +168,9 @@ export function Bills() {
               {from || to || shop || categoryId || paymentMethod ? (
                 "Try widening the filters."
               ) : (
-                <Link to="/new">Add your first bill</Link>
+                <Link to="/new" className="link-chip small">
+                  Add your first bill
+                </Link>
               )}
             </Empty>
           ) : (
@@ -205,10 +207,12 @@ export function Bills() {
                           </button>
                         </td>
                         <td className="mono small" data-label="Date">
-                          <Link to={`/bills/${bill.id}/edit`}>{bill.billDate}</Link>
+                          <Link to={`/bills/${bill.id}/edit`} className="link-chip small">
+                            {bill.billDate}
+                          </Link>
                         </td>
                         <td className="cell-title">
-                          <Link to={`/bills?shop=${encodeURIComponent(bill.shop)}`}>
+                          <Link to={`/bills?shop=${encodeURIComponent(bill.shop)}`} className="link-chip">
                             <strong>{bill.shop}</strong>
                           </Link>
                           {bill.note && <div className="small faint">{bill.note}</div>}

@@ -87,7 +87,9 @@ export function SpendByMonthChart({ buckets, totalPaise }: { buckets: SpendBucke
               return (
                 <tr key={bucket.key}>
                   <td className="cell-title">
-                    <Link to={`/bills?from=${from}&to=${to}`}>{bucket.label}</Link>
+                    <Link to={`/bills?from=${from}&to=${to}`} className="link-chip small">
+                      {bucket.label}
+                    </Link>
                   </td>
                   <td className="num-cell" data-label="Bills">
                     {bucket.billCount}
