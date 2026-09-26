@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../api.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
@@ -166,7 +166,6 @@ export function PriceHistory() {
                       dot={{ r: 4, fill: accent }}
                       activeDot={{ r: 6 }}
                     />
-                    <Scatter dataKey="rupees" fill={accent} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -178,6 +177,7 @@ export function PriceHistory() {
                       <th>Date</th>
                       <th>Shop</th>
                       <th className="num-cell">Bought</th>
+                      <th className="num-cell">Paid</th>
                       <th className="num-cell">Paid / unit</th>
                       <th className="num-cell">Price {stepLabel}</th>
                     </tr>
@@ -196,6 +196,9 @@ export function PriceHistory() {
                           </td>
                           <td className="num-cell mono" data-label="Bought">
                             {point.quantity} {point.unit}
+                          </td>
+                          <td className="num-cell mono" data-label="Paid">
+                            {formatPaise(point.lineTotalPaise)}
                           </td>
                           <td className="num-cell mono" data-label="Paid / unit">
                             {formatPaise(point.unitPricePaise)}/{point.unit}

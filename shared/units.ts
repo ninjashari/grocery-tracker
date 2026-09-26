@@ -57,6 +57,6 @@ export const BASE_PRICE_STEP: Record<BaseUnit, { step: number; label: string }> 
 
 /** Price per display step (per 100 g / per 100 ml / per pc), in paise. */
 export function basePricePaise(lineTotalPaise: number, baseQuantity: number, baseUnit: BaseUnit): number | null {
-  if (!Number.isFinite(baseQuantity) || baseQuantity <= 0) return null;
+  if (!Number.isFinite(lineTotalPaise) || !Number.isFinite(baseQuantity) || baseQuantity <= 0) return null;
   return (lineTotalPaise / baseQuantity) * BASE_PRICE_STEP[baseUnit].step;
 }
