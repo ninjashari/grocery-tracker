@@ -61,6 +61,7 @@ export function ItemBillHistory() {
                     <td data-label="Shop">
                       <Link
                         to={`/bills?shop=${encodeURIComponent(purchase.shop)}`}
+                        className="link-chip small"
                         onClick={(event) => event.stopPropagation()}
                       >
                         {purchase.shop}

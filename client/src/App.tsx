@@ -9,7 +9,9 @@ import { BillEntry } from "./pages/BillEntry.tsx";
 import { Bills } from "./pages/Bills.tsx";
 import { Items } from "./pages/Items.tsx";
 import { PriceHistory } from "./pages/PriceHistory.tsx";
+import { ItemPriceHistoryAllBrands } from "./pages/ItemPriceHistoryAllBrands.tsx";
 import { ItemBillHistory } from "./pages/ItemBillHistory.tsx";
+import { CategorySpendHistory } from "./pages/CategorySpendHistory.tsx";
 import { Reports } from "./pages/Reports.tsx";
 import { DataPage } from "./pages/Data.tsx";
 import { Settings } from "./pages/Settings.tsx";
@@ -114,7 +116,9 @@ export function App() {
           <Route path="/bills/:id/edit" element={<BillEntry />} />
           <Route path="/items" element={<Items />} />
           <Route path="/items/:id/price-history" element={<PriceHistory />} />
+          <Route path="/items/:id/price-history/all-brands" element={<ItemPriceHistoryAllBrands />} />
           <Route path="/items/:id/bills" element={<ItemBillHistory />} />
+          <Route path="/categories/:id/spend-history" element={<CategorySpendHistory />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/data" element={<DataPage />} />
           <Route path="/settings" element={<Settings />} />
