@@ -1,7 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { eq, lte } from "drizzle-orm";
-import { getDb } from "../db/connection.ts";
-import { households, sessions, users } from "../db/schema.ts";
+import { Session } from "../db/models/index.ts";
 import { unauthorized } from "../lib/http.ts";
 
 export const SESSION_COOKIE = "gt_session";
@@ -12,8 +10,8 @@ export const SESSION_DAYS = 30;
  * may take it from a body or query param, or one household could read another's data.
  */
 export type AuthContext = {
-  userId: number;
-  householdId: number;
+  userId: string;
+  householdId: string;
   email: string;
   name: string;
   householdName: string;
@@ -28,8 +26,8 @@ declare global {
   }
 }
 
-export function sessionExpiry(): string {
-  return new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+export function sessionExpiry(): Date {
+  return new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
 }
 
 export function setSessionCookie(res: Response, sessionId: string): void {
@@ -58,38 +56,42 @@ export async function loadAuth(req: Request, _res: Response, next: NextFunction)
     return;
   }
 
-  const db = getDb();
-  const [row] = await db
-    .select({
-      expiresAt: sessions.expiresAt,
-      userId: users.id,
-      email: users.email,
-      name: users.name,
-      householdId: users.householdId,
-      householdName: households.name,
-    })
-    .from(sessions)
-    .innerJoin(users, eq(users.id, sessions.userId))
-    .innerJoin(households, eq(households.id, users.householdId))
-    .where(eq(sessions.id, sessionId));
+  const session = await Session.findById(sessionId).populate({
+    path: "userId",
+    populate: { path: "householdId" },
+  });
 
-  if (!row) {
+  if (!session) {
     next();
     return;
   }
 
-  if (Date.parse(row.expiresAt) <= Date.now()) {
-    await db.delete(sessions).where(eq(sessions.id, sessionId));
+  // A TTL index prunes expired sessions server-side, but that sweep runs on Mongo's
+  // background thread on a ~60s cadence, not instantaneously — this in-request check is a
+  // belt-and-suspenders guard for the gap.
+  if (session.expiresAt.getTime() <= Date.now()) {
+    await Session.deleteOne({ _id: sessionId });
+    next();
+    return;
+  }
+
+  const user = session.userId as unknown as {
+    _id: { toString(): string };
+    email: string;
+    name: string;
+    householdId: { _id: { toString(): string }; name: string };
+  };
+  if (!user || !user.householdId) {
     next();
     return;
   }
 
   req.auth = {
-    userId: row.userId,
-    householdId: row.householdId,
-    email: row.email,
-    name: row.name,
-    householdName: row.householdName,
+    userId: user._id.toString(),
+    householdId: user.householdId._id.toString(),
+    email: user.email,
+    name: user.name,
+    householdName: user.householdId.name,
   };
   next();
 }
@@ -106,9 +108,4 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
 export function auth(req: Request): AuthContext {
   if (!req.auth) throw unauthorized();
   return req.auth;
-}
-
-/** Opportunistic cleanup so the sessions table doesn't grow without bound. */
-export async function purgeExpiredSessions(): Promise<void> {
-  await getDb().delete(sessions).where(lte(sessions.expiresAt, new Date().toISOString()));
 }

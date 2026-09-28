@@ -5,7 +5,7 @@ import { NavLink } from "react-router-dom";
  * trend. These are route changes, not client-state toggles, so it's a NavLink bar
  * rather than the Segmented control — visually matching it via the shared .segmented
  * class (`.segmented a.on` added alongside `.segmented button.on`). */
-export function PriceHistoryTabs({ itemId, categoryId }: { itemId: number | null; categoryId: number | null }) {
+export function PriceHistoryTabs({ itemId, categoryId }: { itemId: string | null; categoryId: string | null }) {
   if (itemId === null) return null;
   return (
     <div className="segmented" role="group">

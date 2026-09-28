@@ -1,175 +1,167 @@
-import { and, eq, sql } from "drizzle-orm";
-import type { Executor } from "../db/connection.ts";
-import { categories, items } from "../db/schema.ts";
+import { isValidObjectId, type ClientSession } from "mongoose";
+import { Category, Item } from "../db/models/index.ts";
 import { conflict, notFound } from "./http.ts";
-import type { Item } from "../../shared/types.ts";
+import type { Item as ItemShape } from "../../shared/types.ts";
 import type { Unit } from "../../shared/units.ts";
 
-/**
- * Item rows always carry their most recent purchase, because bill entry prefills the unit
- * price from it — that prefill is what makes repeat shopping fast.
- *
- * Kept as raw SQL rather than the query builder: the `last` subquery needs
- * `ROW_NUMBER() OVER (PARTITION BY ...)`, which Drizzle's SQLite builder has no
- * first-class helper for.
- */
-const ITEM_SELECT = sql`
-  SELECT i.id,
-         i.brand,
-         i.name,
-         i.category_id   AS categoryId,
-         c.name          AS categoryName,
-         i.default_unit  AS defaultUnit,
-         i.archived      AS archivedInt,
-         last.unit_price_paise AS lastUnitPricePaise,
-         last.unit             AS lastUnit,
-         last.bill_date        AS lastPurchasedOn,
-         last.line_total_paise AS lastLineTotalPaise,
-         last.quantity         AS lastQuantity,
-         COALESCE(stats.purchaseCount, 0) AS purchaseCount
-    FROM items i
-    LEFT JOIN categories c ON c.id = i.category_id
-    LEFT JOIN (
-      SELECT bl.item_id, COUNT(*) AS purchaseCount
-        FROM bill_lines bl
-       GROUP BY bl.item_id
-    ) stats ON stats.item_id = i.id
-    LEFT JOIN (
-      SELECT bl.item_id, bl.unit_price_paise, bl.unit, bl.line_total_paise, bl.quantity, b.bill_date,
-             ROW_NUMBER() OVER (
-               PARTITION BY bl.item_id ORDER BY b.bill_date DESC, bl.id DESC
-             ) AS rn
-        FROM bill_lines bl
-        JOIN bills b ON b.id = bl.bill_id
-    ) last ON last.item_id = i.id AND last.rn = 1
-`;
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-type ItemRow = Omit<Item, "archived"> & { archivedInt: number };
+type PopulatedCategory = { _id: { toString(): string }; name: string };
 
-function toItem(row: ItemRow): Item {
-  const { archivedInt, ...rest } = row;
-  return { ...rest, archived: archivedInt === 1 };
+type ItemDocLike = {
+  _id: { toString(): string };
+  brand: string;
+  name: string;
+  categoryId: PopulatedCategory | { toString(): string } | null;
+  defaultUnit: string;
+  archived: boolean;
+  lastPurchase: {
+    unitPricePaise: number;
+    unit: string;
+    billDate: string;
+    lineTotalPaise: number;
+    quantity: number;
+  } | null;
+  purchaseCount: number;
+};
+
+function isPopulatedCategory(value: unknown): value is PopulatedCategory {
+  return typeof value === "object" && value !== null && "name" in value;
+}
+
+function toItem(doc: ItemDocLike): ItemShape {
+  const category = isPopulatedCategory(doc.categoryId) ? doc.categoryId : null;
+  const categoryId = doc.categoryId === null ? null : category ? category._id.toString() : doc.categoryId.toString();
+
+  return {
+    id: doc._id.toString(),
+    brand: doc.brand,
+    name: doc.name,
+    categoryId,
+    categoryName: category?.name ?? null,
+    defaultUnit: doc.defaultUnit as Unit,
+    archived: doc.archived,
+    lastUnitPricePaise: doc.lastPurchase?.unitPricePaise ?? null,
+    lastUnit: (doc.lastPurchase?.unit as Unit | undefined) ?? null,
+    lastPurchasedOn: doc.lastPurchase?.billDate ?? null,
+    lastLineTotalPaise: doc.lastPurchase?.lineTotalPaise ?? null,
+    lastQuantity: doc.lastPurchase?.quantity ?? null,
+    purchaseCount: doc.purchaseCount,
+  };
 }
 
 export type ItemQuery = {
   q?: string;
-  categoryId?: number;
+  categoryId?: string;
   includeArchived?: boolean;
   limit?: number;
 };
 
-export async function listItems(executor: Executor, householdId: number, query: ItemQuery = {}): Promise<Item[]> {
-  const conditions = [sql`i.household_id = ${householdId}`];
-
-  if (!query.includeArchived) conditions.push(sql`i.archived = 0`);
+export async function listItems(householdId: string, query: ItemQuery = {}): Promise<ItemShape[]> {
+  const filter: Record<string, unknown> = { householdId };
+  if (!query.includeArchived) filter.archived = false;
+  if (query.categoryId !== undefined) filter.categoryId = query.categoryId;
 
   if (query.q) {
     // Match against "brand name" so typing either half, or both, finds the item.
-    conditions.push(sql`(i.brand || ' ' || i.name) LIKE ${`%${query.q}%`} COLLATE NOCASE`);
+    filter.$expr = {
+      $regexMatch: { input: { $concat: ["$brand", " ", "$name"] }, regex: escapeRegex(query.q), options: "i" },
+    };
   }
 
-  if (query.categoryId !== undefined) {
-    conditions.push(sql`i.category_id = ${query.categoryId}`);
-  }
+  const docs = await Item.find(filter)
+    .sort({ nameLower: 1, brandLower: 1 })
+    .limit(query.limit ?? 500)
+    .populate("categoryId", "name");
 
-  const rows = await executor.all<ItemRow>(sql`
-    ${ITEM_SELECT}
-     WHERE ${sql.join(conditions, sql` AND `)}
-     ORDER BY i.name COLLATE NOCASE, i.brand COLLATE NOCASE
-     LIMIT ${query.limit ?? 500}
-  `);
-
-  return rows.map(toItem);
+  return docs.map((doc) => toItem(doc as unknown as ItemDocLike));
 }
 
-export async function getItem(executor: Executor, householdId: number, id: number): Promise<Item | null> {
-  const rows = await executor.all<ItemRow>(
-    sql`${ITEM_SELECT} WHERE i.household_id = ${householdId} AND i.id = ${id}`,
-  );
-  return rows[0] ? toItem(rows[0]) : null;
+export async function getItem(householdId: string, id: string): Promise<ItemShape | null> {
+  if (!isValidObjectId(id)) return null;
+  const doc = await Item.findOne({ householdId, _id: id }).populate("categoryId", "name");
+  return doc ? toItem(doc as unknown as ItemDocLike) : null;
 }
 
-export async function requireItem(executor: Executor, householdId: number, id: number): Promise<Item> {
-  const item = await getItem(executor, householdId, id);
+export async function requireItem(householdId: string, id: string): Promise<ItemShape> {
+  const item = await getItem(householdId, id);
   if (!item) throw notFound("Item not found");
   return item;
 }
 
 /** Throws unless the category belongs to this household (or is null). */
 export async function assertCategoryInHousehold(
-  executor: Executor,
-  householdId: number,
-  categoryId: number | null,
+  householdId: string,
+  categoryId: string | null,
+  session?: ClientSession,
 ): Promise<void> {
   if (categoryId === null) return;
-  const [row] = await executor
-    .select({ id: categories.id })
-    .from(categories)
-    .where(and(eq(categories.id, categoryId), eq(categories.householdId, householdId)));
+  const row = await Category.findOne({ _id: categoryId, householdId }).session(session ?? null);
   if (!row) throw notFound("Category not found");
 }
 
-export type NewItem = { brand: string; name: string; categoryId: number | null; defaultUnit: Unit };
+export type NewItem = { brand: string; name: string; categoryId: string | null; defaultUnit: Unit };
 
 /**
  * Find an existing item by (brand, name) or create it. Used by bill entry and CSV import
  * so neither has to stop and send the user to the catalog first.
  *
- * Caller must pass the transaction's executor if this needs to be part of one.
+ * Pass `session` when this needs to be part of a transaction.
  */
-export async function findOrCreateItem(executor: Executor, householdId: number, input: NewItem): Promise<number> {
-  const [existing] = await executor
-    .select({ id: items.id })
-    .from(items)
-    .where(
-      and(
-        eq(items.householdId, householdId),
-        sql`${items.brand} = ${input.brand} COLLATE NOCASE`,
-        sql`${items.name} = ${input.name} COLLATE NOCASE`,
-      ),
-    );
+export async function findOrCreateItem(
+  householdId: string,
+  input: NewItem,
+  session?: ClientSession,
+): Promise<string> {
+  const brandLower = input.brand.toLowerCase();
+  const nameLower = input.name.toLowerCase();
 
+  const existing = await Item.findOne({ householdId, brandLower, nameLower }).session(session ?? null);
   if (existing) {
     // An item reappearing on a new bill is back in circulation.
-    await executor.update(items).set({ archived: 0 }).where(eq(items.id, existing.id));
-    return existing.id;
+    if (existing.archived) {
+      existing.archived = false;
+      await existing.save({ session });
+    }
+    return existing._id.toString();
   }
 
-  await assertCategoryInHousehold(executor, householdId, input.categoryId);
+  await assertCategoryInHousehold(householdId, input.categoryId, session);
 
-  const [created] = await executor
-    .insert(items)
-    .values({
-      householdId,
-      brand: input.brand,
-      name: input.name,
-      categoryId: input.categoryId,
-      defaultUnit: input.defaultUnit,
-    })
-    .returning({ id: items.id });
+  const [created] = await Item.create(
+    [
+      {
+        householdId,
+        brand: input.brand,
+        brandLower,
+        name: input.name,
+        nameLower,
+        categoryId: input.categoryId,
+        defaultUnit: input.defaultUnit,
+      },
+    ],
+    { session },
+  );
 
-  return created!.id;
+  return created!._id.toString();
 }
 
 export async function assertItemNameFree(
-  executor: Executor,
-  householdId: number,
+  householdId: string,
   brand: string,
   name: string,
-  exceptId?: number,
+  exceptId?: string,
 ): Promise<void> {
-  const conditions = [
-    eq(items.householdId, householdId),
-    sql`${items.brand} = ${brand} COLLATE NOCASE`,
-    sql`${items.name} = ${name} COLLATE NOCASE`,
-  ];
-  if (exceptId !== undefined) conditions.push(sql`${items.id} <> ${exceptId}`);
+  const filter: Record<string, unknown> = {
+    householdId,
+    brandLower: brand.toLowerCase(),
+    nameLower: name.toLowerCase(),
+  };
+  if (exceptId !== undefined) filter._id = { $ne: exceptId };
 
-  const [row] = await executor
-    .select({ id: items.id })
-    .from(items)
-    .where(and(...conditions));
-
+  const row = await Item.findOne(filter);
   if (row) {
     const label = brand ? `${brand} ${name}` : name;
     throw conflict(`You already have an item called "${label}"`);

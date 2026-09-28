@@ -6,22 +6,21 @@
   "description": "Track grocery purchases from daily bills: item catalog, bill entry, spend reports and price history.",
   "scripts": {
     "dev": "concurrently -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:server": "node --watch server/index.ts",
+    "dev:server": "node --env-file-if-exists=.env --watch server/index.ts",
     "dev:client": "vite",
     "build": "vite build",
-    "start": "node server/index.ts",
+    "start": "node --env-file-if-exists=.env server/index.ts",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "typecheck": "tsc --noEmit",
-    "db:push": "node server/db/push.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:push": "node --env-file-if-exists=.env server/db/ensureIndexes.ts",
+    "migrate:mongo": "node --env-file-if-exists=.env scripts/migrate-to-mongo.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
-    "@libsql/client": "^0.18.0",
     "cookie-parser": "^1.4.7",
-    "drizzle-orm": "^0.45.2",
     "express": "^5.1.0",
+    "mongoose": "^8.9.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.1.5",
@@ -29,6 +28,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@libsql/client": "^0.18.0",
     "@types/cookie-parser": "^1.4.8",
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.1",
@@ -36,9 +36,13 @@
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
-    "drizzle-kit": "^0.31.10",
+    "mongodb-memory-server": "^10.1.2",
     "typescript": "^5.7.3",
     "vite": "^6.1.0",
     "vitest": "^3.0.5"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "mongodb-memory-server@10.4.3": true
   }
 }

@@ -9,12 +9,12 @@ import { PAYMENT_METHODS, type PaymentMethod } from "@shared/schemas.ts";
 import type { Category, Item } from "@shared/types.ts";
 import type { BillInput } from "@shared/schemas.ts";
 
-type NewItemDraft = { brand: string; name: string; categoryId: number | null; defaultUnit: Unit };
+type NewItemDraft = { brand: string; name: string; categoryId: string | null; defaultUnit: Unit };
 
 type LineDraft = {
   key: string;
   /** Set once an existing item is picked. */
-  itemId: number | null;
+  itemId: string | null;
   /** Set once a new item is confirmed in the create dialog. */
   newItem: NewItemDraft | null;
   /** What is typed in the combo. Kept even after picking, so the field shows the choice. */
@@ -58,7 +58,7 @@ function splitLabel(label: string, knownBrands: string[]): { brand: string; name
 export function BillEntry() {
   const params = useParams();
   const navigate = useNavigate();
-  const editingId = params["id"] ? Number(params["id"]) : null;
+  const editingId = params["id"] ?? null;
 
   const [items, setItems] = useState<Item[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -642,7 +642,7 @@ function NewItemDialog({
             onConfirm({
               brand: brand.trim(),
               name: name.trim(),
-              categoryId: categoryId === "" ? null : Number(categoryId),
+              categoryId: categoryId === "" ? null : categoryId,
               defaultUnit,
             })
           }

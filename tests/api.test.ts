@@ -1,12 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { pushSQLiteSchema } from "drizzle-kit/api";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 import type { Server } from "node:http";
 
-// Point the singleton connection at a throwaway in-memory database before anything imports it.
-process.env["TURSO_DATABASE_URL"] = "file::memory:";
+// Point the singleton connection at a throwaway in-memory Mongo instance before anything
+// else imports it. A single-node replica set, not a plain standalone server — the app
+// uses multi-document transactions (saveBill, signup, csvImport), which Mongo only
+// supports on a replica set or mongos.
+const mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+process.env["MONGODB_URI"] = mongod.getUri();
 
-const schema = await import("../server/db/schema.ts");
-const { getDb } = await import("../server/db/connection.ts");
+const { connectDb } = await import("../server/db/connection.ts");
+const { ensureIndexes } = await import("../server/db/ensureIndexes.ts");
 const { createApp } = await import("../server/index.ts");
 
 let server: Server;
@@ -42,8 +46,8 @@ function client() {
 }
 
 beforeAll(async () => {
-  const { apply } = await pushSQLiteSchema(schema, getDb());
-  await apply();
+  await connectDb();
+  await ensureIndexes();
 
   server = createApp().listen(0);
   await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -54,6 +58,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  await mongod.stop();
 });
 
 const R = (rupees: number) => Math.round(rupees * 100);
@@ -104,7 +109,7 @@ describe("bills", () => {
     await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
 
     const categories = await call("GET", "/api/categories");
-    const dairy = (categories.data as { id: number; name: string }[]).find((c) => c.name === "Dairy")!;
+    const dairy = (categories.data as { id: string; name: string }[]).find((c) => c.name === "Dairy")!;
 
     const bill = await call("POST", "/api/bills", {
       billDate: "2026-09-08",
@@ -171,8 +176,9 @@ describe("bills", () => {
       paymentMethod: "Cash",
       lines: [
         { newItem: { brand: "", name: "Should Not Exist", categoryId: null, defaultUnit: "pcs" }, quantity: 1, unit: "pcs", lineTotalPaise: R(10) },
-        // 9_999_999 is not an item in this household, so the transaction must abort.
-        { itemId: 9_999_999, quantity: 1, unit: "pcs", lineTotalPaise: R(10) },
+        // A well-formed but nonexistent id — not an item in this household, so the
+        // transaction must abort.
+        { itemId: "000000000000000000000000", quantity: 1, unit: "pcs", lineTotalPaise: R(10) },
       ],
     });
 
@@ -188,7 +194,7 @@ describe("bills", () => {
     await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
 
     const items = await call("GET", "/api/items?q=Milk");
-    const milk = (items.data as { id: number }[])[0]!;
+    const milk = (items.data as { id: string }[])[0]!;
 
     // Same rate as 2 L for Rs 120 (Rs 6.00/100ml), expressed in millilitres: 500 ml for Rs 30.
     await call("POST", "/api/bills", {
@@ -212,7 +218,7 @@ describe("bills", () => {
     await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
 
     const items = await call("GET", "/api/items?q=Milk");
-    const milk = (items.data as { id: number }[])[0]!;
+    const milk = (items.data as { id: string }[])[0]!;
 
     const purchases = await call("GET", `/api/items/${milk.id}/bills`);
     const rows = purchases.data as { billDate: string; shop: string; quantity: number; unit: string }[];
@@ -229,7 +235,7 @@ describe("bills", () => {
     await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
 
     const categories = await call("GET", "/api/categories");
-    const dairy = (categories.data as { id: number; name: string }[]).find((c) => c.name === "Dairy")!;
+    const dairy = (categories.data as { id: string; name: string }[]).find((c) => c.name === "Dairy")!;
 
     const upiBills = await call("GET", "/api/bills?paymentMethod=UPI");
     expect((upiBills.data as { shop: string }[]).map((b) => b.shop)).toEqual(["DMart"]);
@@ -272,7 +278,7 @@ describe("bills", () => {
     await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
 
     const categories = await call("GET", "/api/categories");
-    const dairy = (categories.data as { id: number; name: string }[]).find((c) => c.name === "Dairy")!;
+    const dairy = (categories.data as { id: string; name: string }[]).find((c) => c.name === "Dairy")!;
 
     // Two different brands sharing the exact item name "Paneer" (a fresh name, so this test
     // doesn't disturb the Milk fixtures other tests rely on) — /price-history-all-brands must
@@ -308,7 +314,7 @@ describe("bills", () => {
     await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
 
     const categories = await call("GET", "/api/categories");
-    const dairy = (categories.data as { id: number; name: string }[]).find((c) => c.name === "Dairy")!;
+    const dairy = (categories.data as { id: string; name: string }[]).find((c) => c.name === "Dairy")!;
 
     // Every Dairy purchase so far: DMart's Milk (R120), Local Kirana's Milk (R30), and the
     // two Paneer purchases from the merge test above (R90 + R95) — nothing else in this
@@ -326,9 +332,9 @@ describe("household isolation", () => {
     const owner = client();
     await owner("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
     const ownerBills = await owner("GET", "/api/bills");
-    const ownerBillId = (ownerBills.data as { id: number }[])[0]!.id;
+    const ownerBillId = (ownerBills.data as { id: string }[])[0]!.id;
     const ownerItems = await owner("GET", "/api/items");
-    const ownerItemId = (ownerItems.data as { id: number }[])[0]!.id;
+    const ownerItemId = (ownerItems.data as { id: string }[])[0]!.id;
 
     const stranger = client();
     await stranger("POST", "/api/auth/signup", {
@@ -482,7 +488,7 @@ describe("catalog rules", () => {
     const unused = await call("POST", "/api/items", { name: "Never Bought", categoryId: null, defaultUnit: "pcs" });
     expect((await call("DELETE", `/api/items/${unused.data["id"]}`)).status).toBe(204);
 
-    const used = (await call("GET", "/api/items?q=Milk")).data as { id: number }[];
+    const used = (await call("GET", "/api/items?q=Milk")).data as { id: string }[];
     const archived = await call("DELETE", `/api/items/${used[0]!.id}`);
     expect(archived.status).toBe(200);
     expect(archived.data["archived"]).toBe(true);
@@ -498,14 +504,14 @@ describe("catalog rules", () => {
     const call = client();
     await call("POST", "/api/auth/login", { email: "owner@example.com", password: "hunter2hunter2" });
 
-    const categories = (await call("GET", "/api/categories")).data as { id: number; name: string; itemCount: number }[];
+    const categories = (await call("GET", "/api/categories")).data as { id: string; name: string; itemCount: number }[];
     const inUse = categories.find((category) => category.itemCount > 0)!;
     const target = categories.find((category) => category.id !== inUse.id)!;
 
     expect((await call("DELETE", `/api/categories/${inUse.id}`)).status).toBe(400);
     expect((await call("DELETE", `/api/categories/${inUse.id}?reassignTo=${target.id}`)).status).toBe(204);
 
-    const remaining = (await call("GET", "/api/categories")).data as { id: number }[];
+    const remaining = (await call("GET", "/api/categories")).data as { id: string }[];
     expect(remaining.some((category) => category.id === inUse.id)).toBe(false);
   });
 });

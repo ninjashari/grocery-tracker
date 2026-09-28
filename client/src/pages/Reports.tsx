@@ -15,7 +15,7 @@ import type { Category, SpendBucket, SpendReport, TopItem } from "@shared/types.
 function bucketLink(
   groupBy: Exclude<SpendGrouping, "month">,
   bucket: SpendBucket,
-  categoryIdByName: Map<string, number>,
+  categoryIdByName: Map<string, string>,
 ): string | null {
   if (groupBy === "shop") return `/bills?shop=${encodeURIComponent(bucket.key)}`;
   if (groupBy === "paymentMethod") return `/bills?paymentMethod=${bucket.key}`;

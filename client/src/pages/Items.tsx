@@ -35,7 +35,7 @@ export function Items() {
     Promise.all([
       api.items({
         q: query || undefined,
-        categoryId: categoryId ? Number(categoryId) : undefined,
+        categoryId: categoryId || undefined,
         includeArchived,
       }),
       api.categories(),
@@ -278,7 +278,7 @@ function ItemDialog({
 }) {
   const [brand, setBrand] = useState(item?.brand ?? "");
   const [name, setName] = useState(item?.name ?? "");
-  const [categoryId, setCategoryId] = useState(item?.categoryId ? String(item.categoryId) : "");
+  const [categoryId, setCategoryId] = useState(item?.categoryId ?? "");
   const [defaultUnit, setDefaultUnit] = useState<Unit>(item?.defaultUnit ?? "pcs");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -289,7 +289,7 @@ function ItemDialog({
     const payload = {
       brand: brand.trim(),
       name: name.trim(),
-      categoryId: categoryId === "" ? null : Number(categoryId),
+      categoryId: categoryId === "" ? null : categoryId,
       defaultUnit,
     };
     try {

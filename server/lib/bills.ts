@@ -1,137 +1,222 @@
-import { and, eq, gte, lte, sql } from "drizzle-orm";
-import type { DB, Executor } from "../db/connection.ts";
-import { bills, billLines, categories, items, users } from "../db/schema.ts";
+import { isValidObjectId, Types, type ClientSession } from "mongoose";
+import { withTransaction } from "../db/connection.ts";
+import { Bill, Item } from "../db/models/index.ts";
 import { notFound } from "./http.ts";
 import { findOrCreateItem } from "./items.ts";
 import { toBaseQuantity } from "../../shared/units.ts";
 import { derivedUnitPricePaise } from "../../shared/money.ts";
 import type { BillInput, PaymentMethod } from "../../shared/schemas.ts";
-import type { Bill, BillLine, BillSummary, ItemPurchase } from "../../shared/types.ts";
+import type { Bill as BillShape, BillLine, BillSummary, ItemPurchase } from "../../shared/types.ts";
 
-const billSummaryColumns = {
-  id: bills.id,
-  billDate: bills.billDate,
-  shop: bills.shop,
-  paymentMethod: bills.paymentMethod,
-  statedTotalPaise: bills.statedTotalPaise,
-  note: bills.note,
-  computedTotalPaise: sql<number>`COALESCE(SUM(${billLines.lineTotalPaise}), 0)`,
-  lineCount: sql<number>`COUNT(${billLines.id})`,
-  createdByName: sql<string>`COALESCE(${users.name}, 'Unknown')`,
-};
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export type BillFilter = {
   from?: string;
   to?: string;
   shop?: string;
-  categoryId?: number;
+  categoryId?: string;
   paymentMethod?: PaymentMethod;
   limit: number;
   offset: number;
 };
 
-export async function listBills(executor: Executor, householdId: number, filter: BillFilter): Promise<BillSummary[]> {
-  const conditions = [eq(bills.householdId, householdId)];
-  if (filter.from) conditions.push(gte(bills.billDate, filter.from));
-  if (filter.to) conditions.push(lte(bills.billDate, filter.to));
-  if (filter.shop) conditions.push(sql`${bills.shop} LIKE ${`%${filter.shop}%`} COLLATE NOCASE`);
-  if (filter.paymentMethod) conditions.push(eq(bills.paymentMethod, filter.paymentMethod));
+async function itemIdsInCategory(householdId: string, categoryId: string): Promise<Types.ObjectId[]> {
+  return Item.find({ householdId, categoryId }).distinct("_id");
+}
+
+export async function listBills(householdId: string, filter: BillFilter): Promise<BillSummary[]> {
+  const match: Record<string, unknown> = { householdId: new Types.ObjectId(householdId) };
+  if (filter.from || filter.to) {
+    match.billDate = {
+      ...(filter.from ? { $gte: filter.from } : {}),
+      ...(filter.to ? { $lte: filter.to } : {}),
+    };
+  }
+  if (filter.shop) match.shopLower = { $regex: escapeRegex(filter.shop.toLowerCase()), $options: "i" };
+  if (filter.paymentMethod) match.paymentMethod = filter.paymentMethod;
   if (filter.categoryId !== undefined) {
-    // A category filter narrows which BILLS qualify, without touching the LEFT JOIN below
-    // that sums a qualifying bill's full total — an inner join on items/categoryId here
-    // would silently shrink computedTotalPaise to "spend in that category only".
-    conditions.push(sql`EXISTS (
-      SELECT 1 FROM bill_lines bl2
-      JOIN items i2 ON i2.id = bl2.item_id
-      WHERE bl2.bill_id = bills.id AND i2.category_id = ${filter.categoryId}
-    )`);
+    // A category filter narrows which BILLS qualify, without shrinking computedTotalPaise
+    // down to just that category's lines — a qualifying bill's full total still counts.
+    const ids = await itemIdsInCategory(householdId, filter.categoryId);
+    match["lines.itemId"] = { $in: ids };
   }
 
-  const rows = await executor
-    .select(billSummaryColumns)
-    .from(bills)
-    .leftJoin(billLines, eq(billLines.billId, bills.id))
-    .leftJoin(users, eq(users.id, bills.createdBy))
-    .where(and(...conditions))
-    .groupBy(bills.id)
-    .orderBy(sql`${bills.billDate} DESC`, sql`${bills.id} DESC`)
-    .limit(filter.limit)
-    .offset(filter.offset);
+  const rows = await Bill.aggregate([
+    { $match: match },
+    {
+      $addFields: {
+        computedTotalPaise: { $sum: "$lines.lineTotalPaise" },
+        lineCount: { $size: "$lines" },
+      },
+    },
+    { $lookup: { from: "users", localField: "createdBy", foreignField: "_id", as: "creator" } },
+    { $addFields: { createdByName: { $ifNull: [{ $arrayElemAt: ["$creator.name", 0] }, "Unknown"] } } },
+    { $sort: { billDate: -1, _id: -1 } },
+    { $skip: filter.offset },
+    { $limit: filter.limit },
+    {
+      $project: {
+        id: "$_id",
+        billDate: 1,
+        shop: 1,
+        paymentMethod: 1,
+        statedTotalPaise: 1,
+        note: 1,
+        computedTotalPaise: 1,
+        lineCount: 1,
+        createdByName: 1,
+        _id: 0,
+      },
+    },
+  ]);
 
-  return rows as unknown as BillSummary[];
+  return rows.map((row) => ({ ...row, id: row.id.toString() }) as BillSummary);
 }
 
 /** Every purchase of one item across all bills, newest first — a raw ledger, not the
  * aggregated price-trend view reports/price-history returns. */
-export async function listBillLinesForItem(
-  executor: Executor,
-  householdId: number,
-  itemId: number,
-): Promise<ItemPurchase[]> {
-  const rows = await executor
-    .select({
-      billId: bills.id,
-      billDate: bills.billDate,
-      shop: bills.shop,
-      paymentMethod: bills.paymentMethod,
-      note: bills.note,
-      statedTotalPaise: bills.statedTotalPaise,
-      quantity: billLines.quantity,
-      unit: billLines.unit,
-      unitPricePaise: billLines.unitPricePaise,
-      lineTotalPaise: billLines.lineTotalPaise,
-      baseQuantity: billLines.baseQuantity,
-      baseUnit: billLines.baseUnit,
+export async function listBillLinesForItem(householdId: string, itemId: string): Promise<ItemPurchase[]> {
+  const rows = await Bill.aggregate([
+    { $match: { householdId: new Types.ObjectId(householdId) } },
+    { $unwind: "$lines" },
+    { $match: { "lines.itemId": new Types.ObjectId(itemId) } },
+    { $sort: { billDate: -1, "lines._id": -1 } },
+    {
+      $project: {
+        billId: "$_id",
+        billDate: 1,
+        shop: 1,
+        paymentMethod: 1,
+        note: 1,
+        statedTotalPaise: 1,
+        quantity: "$lines.quantity",
+        unit: "$lines.unit",
+        unitPricePaise: "$lines.unitPricePaise",
+        lineTotalPaise: "$lines.lineTotalPaise",
+        baseQuantity: "$lines.baseQuantity",
+        baseUnit: "$lines.baseUnit",
+        _id: 0,
+      },
+    },
+  ]);
+
+  return rows.map((row) => ({ ...row, billId: row.billId.toString() }) as ItemPurchase);
+}
+
+type BillLineDoc = {
+  _id: { toString(): string };
+  itemId: { _id: { toString(): string }; brand: string; name: string; categoryId: { name: string } | null } | null;
+  quantity: number;
+  unit: string;
+  unitPricePaise: number;
+  lineTotalPaise: number;
+  baseQuantity: number;
+  baseUnit: string;
+};
+
+function toBillLine(line: BillLineDoc): BillLine {
+  return {
+    id: line._id.toString(),
+    itemId: line.itemId?._id.toString() ?? "",
+    brand: line.itemId?.brand ?? "",
+    itemName: line.itemId?.name ?? "",
+    categoryName: line.itemId?.categoryId?.name ?? null,
+    quantity: line.quantity,
+    unit: line.unit as BillLine["unit"],
+    unitPricePaise: line.unitPricePaise,
+    lineTotalPaise: line.lineTotalPaise,
+    baseQuantity: line.baseQuantity,
+    baseUnit: line.baseUnit as BillLine["baseUnit"],
+  };
+}
+
+export async function getBill(householdId: string, id: string): Promise<BillShape | null> {
+  if (!isValidObjectId(id)) return null;
+
+  const doc = await Bill.findOne({ householdId, _id: id })
+    .populate({
+      path: "lines.itemId",
+      select: "brand name categoryId",
+      populate: { path: "categoryId", select: "name" },
     })
-    .from(billLines)
-    .innerJoin(bills, eq(bills.id, billLines.billId))
-    .where(and(eq(billLines.itemId, itemId), eq(bills.householdId, householdId)))
-    .orderBy(sql`${bills.billDate} DESC`, sql`${billLines.id} DESC`);
+    .populate("createdBy", "name");
 
-  return rows as unknown as ItemPurchase[];
+  if (!doc) return null;
+
+  const lines = (doc.lines as unknown as BillLineDoc[]).map(toBillLine);
+  const computedTotalPaise = lines.reduce((sum, line) => sum + line.lineTotalPaise, 0);
+  const createdByName = (doc.createdBy as unknown as { name: string } | null)?.name ?? "Unknown";
+
+  return {
+    id: doc._id.toString(),
+    billDate: doc.billDate,
+    shop: doc.shop,
+    paymentMethod: doc.paymentMethod as PaymentMethod,
+    statedTotalPaise: doc.statedTotalPaise ?? null,
+    note: doc.note,
+    computedTotalPaise,
+    lineCount: lines.length,
+    createdByName,
+    lines,
+  };
 }
 
-export async function getBillLines(executor: Executor, billId: number): Promise<BillLine[]> {
-  const rows = await executor
-    .select({
-      id: billLines.id,
-      itemId: billLines.itemId,
-      brand: items.brand,
-      itemName: items.name,
-      categoryName: categories.name,
-      quantity: billLines.quantity,
-      unit: billLines.unit,
-      unitPricePaise: billLines.unitPricePaise,
-      lineTotalPaise: billLines.lineTotalPaise,
-      baseQuantity: billLines.baseQuantity,
-      baseUnit: billLines.baseUnit,
-    })
-    .from(billLines)
-    .innerJoin(items, eq(items.id, billLines.itemId))
-    .leftJoin(categories, eq(categories.id, items.categoryId))
-    .where(eq(billLines.billId, billId))
-    .orderBy(billLines.id);
-
-  return rows as unknown as BillLine[];
-}
-
-export async function getBill(executor: Executor, householdId: number, id: number): Promise<Bill | null> {
-  const [summary] = await executor
-    .select(billSummaryColumns)
-    .from(bills)
-    .leftJoin(billLines, eq(billLines.billId, bills.id))
-    .leftJoin(users, eq(users.id, bills.createdBy))
-    .where(and(eq(bills.householdId, householdId), eq(bills.id, id)))
-    .groupBy(bills.id);
-
-  if (!summary) return null;
-  return { ...(summary as unknown as BillSummary), lines: await getBillLines(executor, id) };
-}
-
-export async function requireBill(executor: Executor, householdId: number, id: number): Promise<Bill> {
-  const bill = await getBill(executor, householdId, id);
+export async function requireBill(householdId: string, id: string): Promise<BillShape> {
+  const bill = await getBill(householdId, id);
   if (!bill) throw notFound("Bill not found");
   return bill;
+}
+
+/** Best-effort: keeps each item's prefill data current. Not itself the source of truth —
+ * the bills collection is — so a crash between the bill commit and this pass just leaves
+ * a stale prefill until the item's next purchase, which is an acceptable tradeoff. */
+export async function refreshLastPurchase(itemIds: string[]): Promise<void> {
+  for (const itemId of itemIds) {
+    const [latest] = await Bill.aggregate([
+      { $unwind: "$lines" },
+      { $match: { "lines.itemId": new Types.ObjectId(itemId) } },
+      { $sort: { billDate: -1, "lines._id": -1 } },
+      { $limit: 1 },
+      {
+        $project: {
+          unitPricePaise: "$lines.unitPricePaise",
+          unit: "$lines.unit",
+          billDate: 1,
+          lineTotalPaise: "$lines.lineTotalPaise",
+          quantity: "$lines.quantity",
+        },
+      },
+    ]);
+
+    const purchaseCount = await Bill.countDocuments({ "lines.itemId": new Types.ObjectId(itemId) });
+
+    await Item.updateOne(
+      { _id: itemId },
+      {
+        $set: {
+          lastPurchase: latest
+            ? {
+                unitPricePaise: latest.unitPricePaise,
+                unit: latest.unit,
+                billDate: latest.billDate,
+                lineTotalPaise: latest.lineTotalPaise,
+                quantity: latest.quantity,
+              }
+            : null,
+          purchaseCount,
+        },
+      },
+    );
+  }
+}
+
+/** Guards against a request naming an item id that belongs to a different household. */
+async function assertItemInHousehold(householdId: string, itemId: string, session: ClientSession): Promise<string> {
+  const row = await Item.findOne({ _id: itemId, householdId }).session(session);
+  if (!row) throw notFound("Item not found");
+  return row._id.toString();
 }
 
 /**
@@ -142,54 +227,25 @@ export async function requireBill(executor: Executor, householdId: number, id: n
  * what you see in the form is exactly what ends up stored.
  */
 export async function saveBill(
-  db: DB,
-  householdId: number,
-  userId: number,
+  householdId: string,
+  userId: string,
   input: BillInput,
-  billId?: number,
-): Promise<Bill> {
-  const savedId = await db.transaction(async (tx) => {
-    let id = billId;
+  billId?: string,
+): Promise<BillShape> {
+  const affectedItemIds = new Set<string>();
 
-    if (id === undefined) {
-      const [created] = await tx
-        .insert(bills)
-        .values({
-          householdId,
-          billDate: input.billDate,
-          shop: input.shop,
-          paymentMethod: input.paymentMethod,
-          statedTotalPaise: input.statedTotalPaise,
-          note: input.note,
-          createdBy: userId,
-        })
-        .returning({ id: bills.id });
-      id = created!.id;
-    } else {
-      await tx
-        .update(bills)
-        .set({
-          billDate: input.billDate,
-          shop: input.shop,
-          paymentMethod: input.paymentMethod,
-          statedTotalPaise: input.statedTotalPaise,
-          note: input.note,
-        })
-        .where(and(eq(bills.id, id), eq(bills.householdId, householdId)));
-
-      await tx.delete(billLines).where(eq(billLines.billId, id));
-    }
-
+  const savedId = await withTransaction(async (session) => {
+    const lines = [];
     for (const line of input.lines) {
       const itemId =
         line.itemId !== undefined
-          ? await assertItemInHousehold(tx, householdId, line.itemId)
-          : await findOrCreateItem(tx, householdId, line.newItem!);
+          ? await assertItemInHousehold(householdId, line.itemId, session)
+          : await findOrCreateItem(householdId, line.newItem!, session);
+      affectedItemIds.add(itemId);
 
       const { baseQuantity, baseUnit } = toBaseQuantity(line.quantity, line.unit);
       const unitPricePaise = derivedUnitPricePaise(line.lineTotalPaise, line.quantity);
-      await tx.insert(billLines).values({
-        billId: id!,
+      lines.push({
         itemId,
         quantity: line.quantity,
         unit: line.unit,
@@ -200,24 +256,34 @@ export async function saveBill(
       });
     }
 
-    return id!;
+    const header = {
+      householdId,
+      billDate: input.billDate,
+      shop: input.shop,
+      shopLower: input.shop.toLowerCase(),
+      paymentMethod: input.paymentMethod,
+      statedTotalPaise: input.statedTotalPaise,
+      note: input.note,
+      lines,
+    };
+
+    if (billId === undefined) {
+      const [created] = await Bill.create([{ ...header, createdBy: userId }], { session });
+      return created!._id.toString();
+    }
+
+    const updated = await Bill.findOneAndUpdate({ _id: billId, householdId }, { $set: header }, { session, new: true });
+    if (!updated) throw notFound("Bill not found");
+    return updated._id.toString();
   });
 
-  return requireBill(db, householdId, savedId);
+  await refreshLastPurchase([...affectedItemIds]);
+  return requireBill(householdId, savedId);
 }
 
-/** Guards against a request naming an item id that belongs to a different household. */
-async function assertItemInHousehold(executor: Executor, householdId: number, itemId: number): Promise<number> {
-  const [row] = await executor
-    .select({ id: items.id })
-    .from(items)
-    .where(and(eq(items.id, itemId), eq(items.householdId, householdId)));
-  if (!row) throw notFound("Item not found");
-  return row.id;
-}
-
-export async function deleteBill(executor: Executor, householdId: number, id: number): Promise<void> {
-  await requireBill(executor, householdId, id);
-  // bill_lines cascade on delete.
-  await executor.delete(bills).where(and(eq(bills.id, id), eq(bills.householdId, householdId)));
+export async function deleteBill(householdId: string, id: string): Promise<void> {
+  await requireBill(householdId, id);
+  await Bill.deleteOne({ _id: id, householdId });
+  // Any item whose lastPurchase pointed only at this bill now shows a stale prefill until
+  // its next purchase — accepted as a rare, low-stakes staleness (see refreshLastPurchase).
 }

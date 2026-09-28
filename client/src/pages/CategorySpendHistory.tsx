@@ -30,13 +30,13 @@ export function CategorySpendHistory() {
     if (!id) return;
     setLoading(true);
     api
-      .spend({ groupBy: "month", categoryId: Number(id) })
+      .spend({ groupBy: "month", categoryId: id })
       .then(setSpend)
       .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Could not load category spend"))
       .finally(() => setLoading(false));
   }, [id]);
 
-  const category = categories.find((entry) => entry.id === Number(id)) ?? null;
+  const category = categories.find((entry) => entry.id === id) ?? null;
 
   if (loading && !spend) return <Loading />;
 
@@ -49,7 +49,7 @@ export function CategorySpendHistory() {
 
       <ErrorBanner error={error} />
 
-      {fromItem && <PriceHistoryTabs itemId={Number(fromItem)} categoryId={id ? Number(id) : null} />}
+      {fromItem && <PriceHistoryTabs itemId={fromItem} categoryId={id ?? null} />}
 
       <Card>
         <CardHead title="Pick a category">

@@ -1,7 +1,6 @@
 import { Router } from "express";
-import { eq, sql } from "drizzle-orm";
-import { getDb } from "../db/connection.ts";
-import { billLines, bills, items } from "../db/schema.ts";
+import { isValidObjectId, Types } from "mongoose";
+import { Bill, Item } from "../db/models/index.ts";
 import { asyncHandler, parseOrThrow } from "../lib/http.ts";
 import { auth } from "../middleware/auth.ts";
 import {
@@ -21,13 +20,12 @@ itemsRouter.get(
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
     const q = typeof req.query["q"] === "string" ? req.query["q"].trim() : undefined;
-    const categoryRaw = req.query["categoryId"];
-    const categoryId = typeof categoryRaw === "string" && categoryRaw !== "" ? Number(categoryRaw) : undefined;
+    const categoryId = typeof req.query["categoryId"] === "string" ? req.query["categoryId"] : undefined;
 
     res.json(
-      await listItems(getDb(), householdId, {
+      await listItems(householdId, {
         ...(q ? { q } : {}),
-        ...(Number.isInteger(categoryId) ? { categoryId: categoryId as number } : {}),
+        ...(categoryId ? { categoryId } : {}),
         includeArchived: req.query["includeArchived"] === "true",
       }),
     );
@@ -39,18 +37,19 @@ itemsRouter.get(
   "/shops",
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
-    const billCountExpr = sql<number>`COUNT(*)`;
-    const lastUsedExpr = sql<string>`MAX(${bills.billDate})`;
-    const rows = await getDb()
-      .select({
-        shop: bills.shop,
-        billCount: billCountExpr,
-        lastUsed: lastUsedExpr,
-      })
-      .from(bills)
-      .where(eq(bills.householdId, householdId))
-      .groupBy(sql`${bills.shop} COLLATE NOCASE`)
-      .orderBy(sql`${lastUsedExpr} DESC`, sql`${billCountExpr} DESC`);
+    const rows = await Bill.aggregate([
+      { $match: { householdId: new Types.ObjectId(householdId) } },
+      {
+        $group: {
+          _id: "$shopLower",
+          shop: { $first: "$shop" },
+          billCount: { $sum: 1 },
+          lastUsed: { $max: "$billDate" },
+        },
+      },
+      { $sort: { lastUsed: -1, billCount: -1 } },
+      { $project: { shop: 1, billCount: 1, lastUsed: 1, _id: 0 } },
+    ]);
     res.json(rows);
   }),
 );
@@ -58,7 +57,7 @@ itemsRouter.get(
 itemsRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
-    res.json(await requireItem(getDb(), auth(req).householdId, Number(req.params.id)));
+    res.json(await requireItem(auth(req).householdId, String(req.params.id)));
   }),
 );
 
@@ -67,10 +66,9 @@ itemsRouter.get(
   "/:id/bills",
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
-    const id = Number(req.params.id);
-    const db = getDb();
-    await requireItem(db, householdId, id);
-    res.json(await listBillLinesForItem(db, householdId, id));
+    const id = String(req.params.id);
+    await requireItem(householdId, id);
+    res.json(await listBillLinesForItem(householdId, id));
   }),
 );
 
@@ -79,23 +77,21 @@ itemsRouter.post(
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
     const input = parseOrThrow(itemCreateSchema, req.body);
-    const db = getDb();
 
-    await assertItemNameFree(db, householdId, input.brand, input.name);
-    await assertCategoryInHousehold(db, householdId, input.categoryId);
+    await assertItemNameFree(householdId, input.brand, input.name);
+    await assertCategoryInHousehold(householdId, input.categoryId);
 
-    const [created] = await db
-      .insert(items)
-      .values({
-        householdId,
-        brand: input.brand,
-        name: input.name,
-        categoryId: input.categoryId,
-        defaultUnit: input.defaultUnit,
-      })
-      .returning({ id: items.id });
+    const created = await Item.create({
+      householdId,
+      brand: input.brand,
+      brandLower: input.brand.toLowerCase(),
+      name: input.name,
+      nameLower: input.name.toLowerCase(),
+      categoryId: input.categoryId,
+      defaultUnit: input.defaultUnit,
+    });
 
-    res.status(201).json(await getItem(db, householdId, created!.id));
+    res.status(201).json(await getItem(householdId, created._id.toString()));
   }),
 );
 
@@ -103,30 +99,33 @@ itemsRouter.patch(
   "/:id",
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
-    const id = Number(req.params.id);
-    const db = getDb();
-    const current = await requireItem(db, householdId, id);
+    const id = String(req.params.id);
+    const current = await requireItem(householdId, id);
     const input = parseOrThrow(itemUpdateSchema, req.body);
 
     const brand = input.brand ?? current.brand;
     const name = input.name ?? current.name;
     if (brand !== current.brand || name !== current.name) {
-      await assertItemNameFree(db, householdId, brand, name, id);
+      await assertItemNameFree(householdId, brand, name, id);
     }
-    if (input.categoryId !== undefined) await assertCategoryInHousehold(db, householdId, input.categoryId);
+    if (input.categoryId !== undefined) await assertCategoryInHousehold(householdId, input.categoryId);
 
-    await db
-      .update(items)
-      .set({
-        brand,
-        name,
-        categoryId: input.categoryId !== undefined ? input.categoryId : current.categoryId,
-        defaultUnit: input.defaultUnit ?? current.defaultUnit,
-        archived: (input.archived ?? current.archived) ? 1 : 0,
-      })
-      .where(eq(items.id, id));
+    await Item.updateOne(
+      { _id: id },
+      {
+        $set: {
+          brand,
+          brandLower: brand.toLowerCase(),
+          name,
+          nameLower: name.toLowerCase(),
+          categoryId: input.categoryId !== undefined ? input.categoryId : current.categoryId,
+          defaultUnit: input.defaultUnit ?? current.defaultUnit,
+          archived: input.archived ?? current.archived,
+        },
+      },
+    );
 
-    res.json(await getItem(db, householdId, id));
+    res.json(await getItem(householdId, id));
   }),
 );
 
@@ -139,19 +138,18 @@ itemsRouter.delete(
   "/:id",
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
-    const id = Number(req.params.id);
-    const db = getDb();
-    await requireItem(db, householdId, id);
+    const id = String(req.params.id);
+    await requireItem(householdId, id);
 
-    const [used] = await db.select({ n: sql<number>`COUNT(*)` }).from(billLines).where(eq(billLines.itemId, id));
+    const used = isValidObjectId(id) ? await Bill.exists({ "lines.itemId": id }) : null;
 
-    if (used!.n > 0) {
-      await db.update(items).set({ archived: 1 }).where(eq(items.id, id));
-      res.json({ archived: true, item: await getItem(db, householdId, id) });
+    if (used) {
+      await Item.updateOne({ _id: id }, { $set: { archived: true } });
+      res.json({ archived: true, item: await getItem(householdId, id) });
       return;
     }
 
-    await db.delete(items).where(eq(items.id, id));
+    await Item.deleteOne({ _id: id });
     res.status(204).end();
   }),
 );

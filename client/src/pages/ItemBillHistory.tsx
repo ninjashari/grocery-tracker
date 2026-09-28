@@ -17,7 +17,7 @@ export function ItemBillHistory() {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
-    Promise.all([api.item(Number(id)), api.itemBills(Number(id))])
+    Promise.all([api.item(id), api.itemBills(id)])
       .then(([loadedItem, loadedPurchases]) => {
         setItem(loadedItem);
         setPurchases(loadedPurchases);

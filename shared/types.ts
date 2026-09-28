@@ -4,25 +4,25 @@ import type { BaseUnit, Unit } from "./units.ts";
 /** Shapes returned by the API. The client types its responses against these. */
 
 export type User = {
-  id: number;
+  id: string;
   email: string;
   name: string;
-  householdId: number;
+  householdId: string;
   householdName: string;
 };
 
 export type Category = {
-  id: number;
+  id: string;
   name: string;
   sortOrder: number;
   itemCount: number;
 };
 
 export type Item = {
-  id: number;
+  id: string;
   brand: string;
   name: string;
-  categoryId: number | null;
+  categoryId: string | null;
   categoryName: string | null;
   defaultUnit: Unit;
   archived: boolean;
@@ -37,8 +37,8 @@ export type Item = {
 };
 
 export type BillLine = {
-  id: number;
-  itemId: number;
+  id: string;
+  itemId: string;
   brand: string;
   itemName: string;
   categoryName: string | null;
@@ -51,7 +51,7 @@ export type BillLine = {
 };
 
 export type BillSummary = {
-  id: number;
+  id: string;
   billDate: string;
   shop: string;
   paymentMethod: PaymentMethod;
@@ -81,7 +81,7 @@ export type SpendReport = {
 };
 
 export type PricePoint = {
-  billId: number;
+  billId: string;
   billDate: string;
   shop: string;
   quantity: number;
@@ -96,7 +96,7 @@ export type PricePoint = {
 
 /** One raw purchase of an item — a plain ledger row, unlike PricePoint's aggregated view. */
 export type ItemPurchase = {
-  billId: number;
+  billId: string;
   billDate: string;
   shop: string;
   paymentMethod: PaymentMethod;
@@ -136,7 +136,7 @@ export type PriceHistoryByName = {
 };
 
 export type TopItem = {
-  itemId: number;
+  itemId: string;
   brand: string;
   itemName: string;
   categoryName: string | null;

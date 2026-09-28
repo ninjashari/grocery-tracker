@@ -70,9 +70,9 @@ Currency is INR (₹) and units are metric: kg, g, L, ml, pcs, pack, dozen.
 
 Node **24 or newer**. The server runs TypeScript directly through Node's native type
 stripping, so there is no build step for the server itself (only the client goes through
-`vite build`). Data is stored via [Turso](https://turso.tech) (libSQL) — see
-[Data and deployment](#data-and-deployment) below; local development needs no account or
-network access at all.
+`vite build`). Data is stored in [MongoDB Atlas](https://www.mongodb.com/atlas) — see
+[Data and deployment](#data-and-deployment) below; local development points at a free
+Atlas dev database, so you'll need an Atlas account before `npm run dev` works.
 
 ## Running it
 
@@ -88,8 +88,8 @@ That starts the API on `http://localhost:5174` and the Vite dev server on
 `http://localhost:5173`. Open the second one. Both bind to all interfaces, so the app is
 reachable from a phone on the same wifi at `http://<your-machine-ip>:5173`.
 
-Copy `.env.example` to `.env` to change the port or point at a real Turso database
-instead of the local file.
+Copy `.env.example` to `.env` and set `MONGODB_URI` to a free Atlas cluster's connection
+string (a separate dev database from whatever production uses).
 
 For a single-process production run, build the client first — the server then serves it
 from the same origin:
@@ -143,7 +143,7 @@ re-imported without creating duplicates.
 ```
 shared/     units, money, CSV and zod schemas — used by both server and client
 server/     Express API; routes/ per resource, lib/ for the logic they share
-  db/       Drizzle ORM: connection, schema.ts (source of truth), category seed
+  db/       Mongoose: connection, models/ (source of truth), category seed
 client/     React app; pages/ per screen, components/ for shared UI
 tests/      vitest — unit tests for shared/, integration tests against the real API
 docs/       screenshots used in this README
@@ -163,14 +163,14 @@ npm run typecheck
 
 ## Data and deployment
 
-Data is stored via **Turso** (libSQL — a SQLite-compatible, network-hosted database with
-a durable free tier). Locally, with no `TURSO_DATABASE_URL` set, the app falls back to a
-plain embedded file at `data/grocery.db` — no account, no network, `npm install && npm
-run dev` just works. Only a deployed instance needs real Turso credentials.
+Data is stored in **MongoDB Atlas** (a free M0 cluster is enough — it's a real replica
+set, so it supports the app's multi-document transactions). Local dev and production
+point at two different databases on the same free cluster (e.g. `grocery_dev` vs
+`grocery_prod`), both reached through `MONGODB_URI` in `.env`.
 
 This matters specifically because of where this app is meant to run: Render's free tier
 has **no persistent disk** — every deploy and restart wipes the container filesystem, so
-a locally-stored SQLite file would lose all its data on the next deploy. A network
+a locally-stored database file would lose all its data on the next deploy. A network
 database sidesteps that entirely.
 
 Run behind TLS if you expose it beyond your own network — session cookies are marked
@@ -181,18 +181,20 @@ Run behind TLS if you expose it beyond your own network — session cookies are 
 This deploys as a plain Node web service (no Docker) — either via the included
 `render.yaml` Blueprint or by hand:
 
-1. Create a [Turso](https://turso.tech) account and database, and note its connection
-   URL (`libsql://<name>-<org>.turso.io`) and an auth token for it.
+1. Create a [MongoDB Atlas](https://www.mongodb.com/atlas) account, a free M0 cluster, a
+   database user, and a network access rule allowing connections from anywhere (Render's
+   free tier has no static outbound IP to allowlist more narrowly). Note the
+   `mongodb+srv://...` connection string.
 2. Push this repo to GitHub (or GitLab).
 3. **Blueprint path**: Render dashboard → **New → Blueprint**, pick the repo. Render
    reads `render.yaml` and proposes a free-tier Node web service. Confirm, then set
-   `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in the service's **Environment** tab (the
-   Blueprint marks them `sync: false` deliberately, so they're never committed to the
-   repo — you set them once in the dashboard).
+   `MONGODB_URI` in the service's **Environment** tab (the Blueprint marks it
+   `sync: false` deliberately, so it's never committed to the repo — you set it once in
+   the dashboard).
    **Manual path**: **New → Web Service** → connect the repo → environment **Node** →
    Build Command `npm install && npm run build` → Start Command `npm start` → set
-   `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` → Health Check Path `/api/health`. `PORT` is
-   injected by Render automatically.
+   `MONGODB_URI` → Health Check Path `/api/health`. `PORT` is injected by Render
+   automatically.
 4. Deploy, then open the `*.onrender.com` URL and sign up — that creates your household.
 5. Confirm persistence actually works: add a bill, trigger a redeploy (push a commit, or
    redeploy manually from the dashboard), and check the bill survived.
