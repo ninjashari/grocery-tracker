@@ -9,7 +9,5 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: TURSO_DATABASE_URL
-        sync: false # set manually in the Render dashboard — your Turso database's libsql:// URL
-      - key: TURSO_AUTH_TOKEN
-        sync: false # set manually in the Render dashboard — never commit a Turso auth token
+      - key: MONGODB_URI
+        sync: false # set manually in the Render dashboard — Atlas connection string, never committed

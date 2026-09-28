@@ -40,7 +40,7 @@ export function ItemPriceHistoryAllBrands() {
     if (!id) return;
     setLoading(true);
     api
-      .item(Number(id))
+      .item(id)
       .then((loadedItem) => {
         setItem(loadedItem);
         return api.priceHistoryAllBrands(loadedItem.name);

@@ -1,5 +1,5 @@
-import type { Executor } from "./connection.ts";
-import { categories } from "./schema.ts";
+import type { ClientSession, Types } from "mongoose";
+import { Category } from "./models/index.ts";
 
 /** Starting point for a new household. Fully editable afterwards. */
 export const DEFAULT_CATEGORIES = [
@@ -18,8 +18,14 @@ export const DEFAULT_CATEGORIES = [
 ] as const;
 
 /** Must run inside the same transaction that created the household. */
-export async function seedCategories(executor: Executor, householdId: number): Promise<void> {
-  await executor
-    .insert(categories)
-    .values(DEFAULT_CATEGORIES.map((name, index) => ({ householdId, name, sortOrder: index })));
+export async function seedCategories(householdId: Types.ObjectId, session: ClientSession): Promise<void> {
+  await Category.insertMany(
+    DEFAULT_CATEGORIES.map((name, index) => ({
+      householdId,
+      name,
+      nameLower: name.toLowerCase(),
+      sortOrder: index,
+    })),
+    { session },
+  );
 }

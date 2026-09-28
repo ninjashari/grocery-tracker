@@ -1,7 +1,6 @@
 import { Router } from "express";
-import { and, eq, gte, lte, sql } from "drizzle-orm";
-import { getDb } from "../db/connection.ts";
-import { billLines, bills, categories, items } from "../db/schema.ts";
+import { Types } from "mongoose";
+import { Bill, Item } from "../db/models/index.ts";
 import { asyncHandler, parseOrThrow } from "../lib/http.ts";
 import { auth } from "../middleware/auth.ts";
 import { requireItem } from "../lib/items.ts";
@@ -10,6 +9,7 @@ import {
   priceHistoryQuerySchema,
   spendQuerySchema,
   topItemsQuerySchema,
+  type SpendGrouping,
 } from "../../shared/schemas.ts";
 import { basePricePaise } from "../../shared/units.ts";
 import type { BaseUnit } from "../../shared/units.ts";
@@ -25,19 +25,32 @@ import type {
 
 export const reportsRouter = Router();
 
-/** Whitelist: these expressions are interpolated into SQL, so they can never be user input. */
-const SPEND_GROUP_SQL = {
-  month: sql`strftime('%Y-%m', ${bills.billDate})`,
-  category: sql`COALESCE(${categories.name}, 'Uncategorised')`,
-  shop: bills.shop,
-  paymentMethod: bills.paymentMethod,
-} as const;
+const MONTH_KEY_EXPR = { $substrCP: ["$billDate", 0, 7] };
 
-function dateConditions(from: string | undefined, to: string | undefined) {
-  const conditions = [];
-  if (from) conditions.push(gte(bills.billDate, from));
-  if (to) conditions.push(lte(bills.billDate, to));
-  return conditions;
+/** Whitelist: these expressions build the aggregation $group key, so they can never be
+ * user input. */
+const SPEND_GROUP_KEY: Record<SpendGrouping, unknown> = {
+  month: MONTH_KEY_EXPR,
+  category: "$categoryName",
+  shop: "$shop",
+  paymentMethod: "$paymentMethod",
+};
+
+function dateMatch(from: string | undefined, to: string | undefined): Record<string, unknown> {
+  if (!from && !to) return {};
+  return { billDate: { ...(from ? { $gte: from } : {}), ...(to ? { $lte: to } : {}) } };
+}
+
+function monthLabel(key: string): string {
+  const [year, month] = key.split("-");
+  if (!year || !month) return key;
+  const date = new Date(Number(year), Number(month) - 1, 1);
+  return date.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+}
+
+function pctChange(from: number | null, to: number | null): number | null {
+  if (from === null || to === null || from === 0) return null;
+  return ((to - from) / from) * 100;
 }
 
 reportsRouter.get(
@@ -45,34 +58,42 @@ reportsRouter.get(
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
     const query = parseOrThrow(spendQuerySchema, req.query);
-    const groupExpr = SPEND_GROUP_SQL[query.groupBy];
-    const totalPaiseExpr = sql<number>`SUM(${billLines.lineTotalPaise})`;
 
-    // Drizzle doesn't emit SQL-level aliases for raw `sql` select fields, so ORDER BY must
-    // reuse the actual expression — an alias like `ORDER BY key` would reference a column
-    // that doesn't exist in the generated SQL.
-    const buckets = await getDb()
-      .select({
-        key: groupExpr,
-        totalPaise: totalPaiseExpr,
-        billCount: sql<number>`COUNT(DISTINCT ${bills.id})`,
-        lineCount: sql<number>`COUNT(${billLines.id})`,
-      })
-      .from(billLines)
-      .innerJoin(bills, eq(bills.id, billLines.billId))
-      .innerJoin(items, eq(items.id, billLines.itemId))
-      .leftJoin(categories, eq(categories.id, items.categoryId))
-      .where(
-        and(
-          eq(bills.householdId, householdId),
-          ...dateConditions(query.from, query.to),
-          ...(query.categoryId !== undefined ? [eq(items.categoryId, query.categoryId)] : []),
-        ),
-      )
-      .groupBy(groupExpr)
-      .orderBy(query.groupBy === "month" ? groupExpr : sql`${totalPaiseExpr} DESC`);
+    const buckets = await Bill.aggregate([
+      { $match: { householdId: new Types.ObjectId(householdId), ...dateMatch(query.from, query.to) } },
+      { $unwind: "$lines" },
+      { $lookup: { from: "items", localField: "lines.itemId", foreignField: "_id", as: "item" } },
+      { $unwind: "$item" },
+      ...(query.categoryId !== undefined
+        ? [{ $match: { "item.categoryId": new Types.ObjectId(query.categoryId) } }]
+        : []),
+      { $lookup: { from: "categories", localField: "item.categoryId", foreignField: "_id", as: "category" } },
+      {
+        $addFields: {
+          categoryName: { $ifNull: [{ $arrayElemAt: ["$category.name", 0] }, "Uncategorised"] },
+        },
+      },
+      {
+        $group: {
+          _id: SPEND_GROUP_KEY[query.groupBy],
+          totalPaise: { $sum: "$lines.lineTotalPaise" },
+          billIds: { $addToSet: "$_id" },
+          lineCount: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          key: "$_id",
+          totalPaise: 1,
+          billCount: { $size: "$billIds" },
+          lineCount: 1,
+          _id: 0,
+        },
+      },
+      { $sort: query.groupBy === "month" ? { key: 1 } : { totalPaise: -1 } },
+    ]);
 
-    const withLabels: SpendBucket[] = (buckets as unknown as Omit<SpendBucket, "label">[]).map((bucket) => ({
+    const withLabels: SpendBucket[] = (buckets as Omit<SpendBucket, "label">[]).map((bucket) => ({
       ...bucket,
       label: query.groupBy === "month" ? monthLabel(bucket.key) : bucket.key,
     }));
@@ -87,13 +108,6 @@ reportsRouter.get(
   }),
 );
 
-function monthLabel(key: string): string {
-  const [year, month] = key.split("-");
-  if (!year || !month) return key;
-  const date = new Date(Number(year), Number(month) - 1, 1);
-  return date.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
-}
-
 /**
  * Price history for one item, quoted per 100 g / 100 ml / pc so purchases recorded in
  * different units (1 kg vs 500 g) sit on the same curve.
@@ -103,29 +117,34 @@ reportsRouter.get(
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
     const query = parseOrThrow(priceHistoryQuerySchema, req.query);
-    const db = getDb();
-    const item = await requireItem(db, householdId, query.itemId);
+    const item = await requireItem(householdId, query.itemId);
 
-    const rows = await db
-      .select({
-        billId: bills.id,
-        billDate: bills.billDate,
-        shop: bills.shop,
-        quantity: billLines.quantity,
-        unit: billLines.unit,
-        unitPricePaise: billLines.unitPricePaise,
-        lineTotalPaise: billLines.lineTotalPaise,
-        baseQuantity: billLines.baseQuantity,
-        baseUnit: billLines.baseUnit,
-      })
-      .from(billLines)
-      .innerJoin(bills, eq(bills.id, billLines.billId))
-      .where(and(eq(billLines.itemId, query.itemId), eq(bills.householdId, householdId)))
-      .orderBy(bills.billDate, billLines.id);
+    const rows = await Bill.aggregate([
+      { $match: { householdId: new Types.ObjectId(householdId) } },
+      { $unwind: "$lines" },
+      { $match: { "lines.itemId": new Types.ObjectId(query.itemId) } },
+      { $sort: { billDate: 1, "lines._id": 1 } },
+      {
+        $project: {
+          billId: "$_id",
+          billDate: 1,
+          shop: 1,
+          quantity: "$lines.quantity",
+          unit: "$lines.unit",
+          unitPricePaise: "$lines.unitPricePaise",
+          lineTotalPaise: "$lines.lineTotalPaise",
+          baseQuantity: "$lines.baseQuantity",
+          baseUnit: "$lines.baseUnit",
+          _id: 0,
+        },
+      },
+    ]);
 
-    const points: PricePoint[] = (rows as unknown as Omit<PricePoint, "basePricePaise">[]).flatMap((row) => {
+    const points: PricePoint[] = (
+      rows as (Omit<PricePoint, "basePricePaise" | "billId"> & { billId: Types.ObjectId })[]
+    ).flatMap((row) => {
       const price = basePricePaise(row.lineTotalPaise, row.baseQuantity, row.baseUnit);
-      return price === null ? [] : [{ ...row, basePricePaise: price }];
+      return price === null ? [] : [{ ...row, billId: String(row.billId), basePricePaise: price }];
     });
 
     const first = points[0]?.basePricePaise ?? null;
@@ -146,7 +165,7 @@ reportsRouter.get(
 
 /**
  * Same as /price-history, but merged across every brand sharing this item's name —
- * "irrespective of brand". Groups on (household_id, name COLLATE NOCASE), the same
+ * "irrespective of brand". Groups on (household_id, name lowercased), the same
  * case-insensitive idiom findOrCreateItem/assertItemNameFree use, just without the brand
  * comparison half.
  */
@@ -155,40 +174,43 @@ reportsRouter.get(
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
     const query = parseOrThrow(priceHistoryByNameQuerySchema, req.query);
-    const db = getDb();
+    const nameLower = query.name.toLowerCase();
 
-    const [categoryRow] = await db
-      .select({ categoryName: categories.name })
-      .from(items)
-      .leftJoin(categories, eq(categories.id, items.categoryId))
-      .where(and(eq(items.householdId, householdId), sql`${items.name} = ${query.name} COLLATE NOCASE`))
-      .limit(1);
-
-    const rows = await db
-      .select({
-        billId: bills.id,
-        billDate: bills.billDate,
-        shop: bills.shop,
-        brand: items.brand,
-        quantity: billLines.quantity,
-        unit: billLines.unit,
-        unitPricePaise: billLines.unitPricePaise,
-        lineTotalPaise: billLines.lineTotalPaise,
-        baseQuantity: billLines.baseQuantity,
-        baseUnit: billLines.baseUnit,
-      })
-      .from(billLines)
-      .innerJoin(bills, eq(bills.id, billLines.billId))
-      .innerJoin(items, eq(items.id, billLines.itemId))
-      .where(and(eq(items.householdId, householdId), sql`${items.name} = ${query.name} COLLATE NOCASE`))
-      .orderBy(bills.billDate, billLines.id);
-
-    const points: PricePointWithBrand[] = (rows as unknown as Omit<PricePointWithBrand, "basePricePaise">[]).flatMap(
-      (row) => {
-        const price = basePricePaise(row.lineTotalPaise, row.baseQuantity, row.baseUnit);
-        return price === null ? [] : [{ ...row, basePricePaise: price }];
-      },
+    const categoryDoc = await Item.findOne({ householdId, nameLower }).populate<{ categoryId: { name: string } | null }>(
+      "categoryId",
+      "name",
     );
+
+    const rows = await Bill.aggregate([
+      { $match: { householdId: new Types.ObjectId(householdId) } },
+      { $unwind: "$lines" },
+      { $lookup: { from: "items", localField: "lines.itemId", foreignField: "_id", as: "item" } },
+      { $unwind: "$item" },
+      { $match: { "item.nameLower": nameLower } },
+      { $sort: { billDate: 1, "lines._id": 1 } },
+      {
+        $project: {
+          billId: "$_id",
+          billDate: 1,
+          shop: 1,
+          brand: "$item.brand",
+          quantity: "$lines.quantity",
+          unit: "$lines.unit",
+          unitPricePaise: "$lines.unitPricePaise",
+          lineTotalPaise: "$lines.lineTotalPaise",
+          baseQuantity: "$lines.baseQuantity",
+          baseUnit: "$lines.baseUnit",
+          _id: 0,
+        },
+      },
+    ]);
+
+    const points: PricePointWithBrand[] = (rows as (Omit<PricePointWithBrand, "basePricePaise" | "billId"> & {
+      billId: Types.ObjectId;
+    })[]).flatMap((row) => {
+      const price = basePricePaise(row.lineTotalPaise, row.baseQuantity, row.baseUnit);
+      return price === null ? [] : [{ ...row, billId: String(row.billId), basePricePaise: price }];
+    });
 
     const first = points[0]?.basePricePaise ?? null;
     const latest = points.at(-1)?.basePricePaise ?? null;
@@ -196,7 +218,7 @@ reportsRouter.get(
 
     res.json({
       name: query.name,
-      categoryName: categoryRow?.categoryName ?? null,
+      categoryName: categoryDoc?.categoryId?.name ?? null,
       baseUnit: (points[0]?.baseUnit as BaseUnit | undefined) ?? null,
       points,
       firstBasePricePaise: first,
@@ -207,42 +229,47 @@ reportsRouter.get(
   }),
 );
 
-function pctChange(from: number | null, to: number | null): number | null {
-  if (from === null || to === null || from === 0) return null;
-  return ((to - from) / from) * 100;
-}
-
 reportsRouter.get(
   "/top-items",
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
     const query = parseOrThrow(topItemsQuerySchema, req.query);
 
-    const rows = await getDb()
-      .select({
-        itemId: items.id,
-        brand: items.brand,
-        itemName: items.name,
-        categoryName: categories.name,
-        totalPaise: sql<number>`SUM(${billLines.lineTotalPaise})`,
-        totalBaseQuantity: sql<number>`SUM(${billLines.baseQuantity})`,
-        baseUnit: billLines.baseUnit,
-        purchaseCount: sql<number>`COUNT(*)`,
-      })
-      .from(billLines)
-      .innerJoin(bills, eq(bills.id, billLines.billId))
-      .innerJoin(items, eq(items.id, billLines.itemId))
-      .leftJoin(categories, eq(categories.id, items.categoryId))
-      .where(and(eq(bills.householdId, householdId), ...dateConditions(query.from, query.to)))
-      .groupBy(items.id, billLines.baseUnit)
-      .orderBy(
-        query.metric === "spend"
-          ? sql`SUM(${billLines.lineTotalPaise}) DESC`
-          : sql`SUM(${billLines.baseQuantity}) DESC`,
-      )
-      .limit(query.limit);
+    const rows = await Bill.aggregate([
+      { $match: { householdId: new Types.ObjectId(householdId), ...dateMatch(query.from, query.to) } },
+      { $unwind: "$lines" },
+      {
+        $group: {
+          _id: { itemId: "$lines.itemId", baseUnit: "$lines.baseUnit" },
+          totalPaise: { $sum: "$lines.lineTotalPaise" },
+          totalBaseQuantity: { $sum: "$lines.baseQuantity" },
+          purchaseCount: { $sum: 1 },
+        },
+      },
+      { $lookup: { from: "items", localField: "_id.itemId", foreignField: "_id", as: "item" } },
+      { $unwind: "$item" },
+      { $lookup: { from: "categories", localField: "item.categoryId", foreignField: "_id", as: "category" } },
+      {
+        $project: {
+          itemId: "$_id.itemId",
+          brand: "$item.brand",
+          itemName: "$item.name",
+          categoryName: { $arrayElemAt: ["$category.name", 0] },
+          totalPaise: 1,
+          totalBaseQuantity: 1,
+          baseUnit: "$_id.baseUnit",
+          purchaseCount: 1,
+          _id: 0,
+        },
+      },
+      { $sort: query.metric === "spend" ? { totalPaise: -1 } : { totalBaseQuantity: -1 } },
+      { $limit: query.limit },
+    ]);
 
-    res.json(rows as unknown as TopItem[]);
+    res.json((rows as (Omit<TopItem, "itemId"> & { itemId: Types.ObjectId })[]).map((row) => ({
+      ...row,
+      itemId: String(row.itemId),
+    })) satisfies TopItem[]);
   }),
 );
 
@@ -251,39 +278,29 @@ reportsRouter.get(
   "/summary",
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
-    const db = getDb();
+    const match = { householdId: new Types.ObjectId(householdId) };
 
-    const [totals] = await db
-      .select({
-        totalPaise: sql<number>`COALESCE(SUM(${billLines.lineTotalPaise}), 0)`,
-        billCount: sql<number>`COUNT(DISTINCT ${bills.id})`,
-      })
-      .from(bills)
-      .leftJoin(billLines, eq(billLines.billId, bills.id))
-      .where(eq(bills.householdId, householdId));
+    const [totals] = await Bill.aggregate([
+      { $match: match },
+      { $project: { billTotal: { $sum: "$lines.lineTotalPaise" } } },
+      { $group: { _id: null, totalPaise: { $sum: "$billTotal" }, billCount: { $sum: 1 } } },
+    ]);
 
-    const monthExpr = sql<string>`strftime('%Y-%m', ${bills.billDate})`;
-    const byMonth = await db
-      .select({
-        month: monthExpr,
-        totalPaise: sql<number>`COALESCE(SUM(${billLines.lineTotalPaise}), 0)`,
-      })
-      .from(bills)
-      .leftJoin(billLines, eq(billLines.billId, bills.id))
-      .where(eq(bills.householdId, householdId))
-      .groupBy(monthExpr)
-      .orderBy(sql`${monthExpr} DESC`)
-      .limit(2);
+    const byMonth = await Bill.aggregate([
+      { $match: match },
+      { $project: { month: MONTH_KEY_EXPR, billTotal: { $sum: "$lines.lineTotalPaise" } } },
+      { $group: { _id: "$month", totalPaise: { $sum: "$billTotal" } } },
+      { $sort: { _id: -1 } },
+      { $limit: 2 },
+      { $project: { month: "$_id", totalPaise: 1, _id: 0 } },
+    ]);
 
-    const [itemCount] = await db
-      .select({ n: sql<number>`COUNT(*)` })
-      .from(items)
-      .where(and(eq(items.householdId, householdId), eq(items.archived, 0)));
+    const itemCount = await Item.countDocuments({ householdId, archived: false });
 
     res.json({
-      totalPaise: totals!.totalPaise,
-      billCount: totals!.billCount,
-      itemCount: itemCount!.n,
+      totalPaise: totals?.totalPaise ?? 0,
+      billCount: totals?.billCount ?? 0,
+      itemCount,
       currentMonth: byMonth[0] ?? null,
       previousMonth: byMonth[1] ?? null,
     });

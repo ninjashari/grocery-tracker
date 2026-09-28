@@ -1,7 +1,6 @@
 import { Router } from "express";
-import { eq } from "drizzle-orm";
-import { getDb } from "../db/connection.ts";
-import { billLines, bills, categories, items } from "../db/schema.ts";
+import { Types } from "mongoose";
+import { Bill } from "../db/models/index.ts";
 import { asyncHandler, badRequest, parseOrThrow } from "../lib/http.ts";
 import { auth } from "../middleware/auth.ts";
 import { commitImport, stageImport, toPreview } from "../lib/csvImport.ts";
@@ -17,27 +16,31 @@ dataRouter.get(
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
 
-    const rows = await getDb()
-      .select({
-        billDate: bills.billDate,
-        shop: bills.shop,
-        paymentMethod: bills.paymentMethod,
-        brand: items.brand,
-        itemName: items.name,
-        category: categories.name,
-        quantity: billLines.quantity,
-        unit: billLines.unit,
-        unitPricePaise: billLines.unitPricePaise,
-        lineTotalPaise: billLines.lineTotalPaise,
-        statedTotalPaise: bills.statedTotalPaise,
-        note: bills.note,
-      })
-      .from(billLines)
-      .innerJoin(bills, eq(bills.id, billLines.billId))
-      .innerJoin(items, eq(items.id, billLines.itemId))
-      .leftJoin(categories, eq(categories.id, items.categoryId))
-      .where(eq(bills.householdId, householdId))
-      .orderBy(bills.billDate, bills.id, billLines.id);
+    const rows = await Bill.aggregate([
+      { $match: { householdId: new Types.ObjectId(householdId) } },
+      { $unwind: "$lines" },
+      { $lookup: { from: "items", localField: "lines.itemId", foreignField: "_id", as: "item" } },
+      { $unwind: "$item" },
+      { $lookup: { from: "categories", localField: "item.categoryId", foreignField: "_id", as: "category" } },
+      { $sort: { billDate: 1, _id: 1, "lines._id": 1 } },
+      {
+        $project: {
+          billDate: 1,
+          shop: 1,
+          paymentMethod: 1,
+          brand: "$item.brand",
+          itemName: "$item.name",
+          category: { $arrayElemAt: ["$category.name", 0] },
+          quantity: "$lines.quantity",
+          unit: "$lines.unit",
+          unitPricePaise: "$lines.unitPricePaise",
+          lineTotalPaise: "$lines.lineTotalPaise",
+          statedTotalPaise: 1,
+          note: 1,
+          _id: 0,
+        },
+      },
+    ]);
 
     const csv = toCsv(
       CSV_COLUMNS,
@@ -52,7 +55,9 @@ dataRouter.get(
         row.unit,
         paiseToRupees(row.unitPricePaise).toFixed(2),
         paiseToRupees(row.lineTotalPaise).toFixed(2),
-        row.statedTotalPaise === null ? "" : paiseToRupees(row.statedTotalPaise).toFixed(2),
+        row.statedTotalPaise === null || row.statedTotalPaise === undefined
+          ? ""
+          : paiseToRupees(row.statedTotalPaise).toFixed(2),
         row.note,
       ]),
     );
@@ -70,7 +75,7 @@ dataRouter.post(
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
     const csv = readCsvBody(req.body);
-    const staged = await stageImport(getDb(), householdId, csv);
+    const staged = await stageImport(householdId, csv);
     res.json(toPreview(staged));
   }),
 );
@@ -81,9 +86,8 @@ dataRouter.post(
   asyncHandler(async (req, res) => {
     const { householdId, userId } = auth(req);
     const input = parseOrThrow(importCommitSchema, req.body);
-    const db = getDb();
-    const staged = await stageImport(db, householdId, input.csv);
-    const result = await commitImport(db, householdId, userId, staged);
+    const staged = await stageImport(householdId, input.csv);
+    const result = await commitImport(householdId, userId, staged);
     res.status(201).json({ ...result, skippedRows: staged.errors.length });
   }),
 );

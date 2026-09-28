@@ -1,51 +1,37 @@
 import { Router } from "express";
-import { and, eq, ne, sql } from "drizzle-orm";
-import { getDb } from "../db/connection.ts";
-import type { Executor } from "../db/connection.ts";
-import { categories, items } from "../db/schema.ts";
+import { isValidObjectId } from "mongoose";
+import { withTransaction } from "../db/connection.ts";
+import { Category, Item } from "../db/models/index.ts";
 import { asyncHandler, badRequest, conflict, notFound, parseOrThrow } from "../lib/http.ts";
 import { auth } from "../middleware/auth.ts";
 import { categoryCreateSchema, categoryUpdateSchema } from "../../shared/schemas.ts";
-import type { Category } from "../../shared/types.ts";
+import type { Category as CategoryShape } from "../../shared/types.ts";
 
 export const categoriesRouter = Router();
 
-async function listCategories(executor: Executor, householdId: number): Promise<Category[]> {
-  const rows = await executor
-    .select({
-      id: categories.id,
-      name: categories.name,
-      sortOrder: categories.sortOrder,
-      // Written with explicit literal table names, not interpolated column refs: Drizzle
-      // renders a single-table outer query's own columns unqualified (just "id"), which
-      // inside this nested subquery collides with items' own "id" column and silently
-      // breaks the correlation.
-      itemCount: sql<number>`(SELECT COUNT(*) FROM items WHERE items.category_id = categories.id)`,
-    })
-    .from(categories)
-    .where(eq(categories.householdId, householdId))
-    .orderBy(categories.sortOrder, categories.name);
-  return rows as unknown as Category[];
+async function listCategories(householdId: string): Promise<CategoryShape[]> {
+  const docs = await Category.find({ householdId }).sort({ sortOrder: 1, name: 1 });
+  const counts = await Promise.all(docs.map((doc) => Item.countDocuments({ categoryId: doc._id })));
+  return docs.map((doc, index) => ({
+    id: doc._id.toString(),
+    name: doc.name,
+    sortOrder: doc.sortOrder,
+    itemCount: counts[index]!,
+  }));
 }
 
 /** Fetch a category, scoped to the household so an id from another one reads as missing. */
-async function requireCategory(
-  executor: Executor,
-  householdId: number,
-  id: number,
-): Promise<{ id: number; name: string }> {
-  const [row] = await executor
-    .select({ id: categories.id, name: categories.name })
-    .from(categories)
-    .where(and(eq(categories.id, id), eq(categories.householdId, householdId)));
+async function requireCategory(householdId: string, id: string): Promise<{ id: string; name: string }> {
+  if (!isValidObjectId(id)) throw notFound("Category not found");
+  const row = await Category.findOne({ _id: id, householdId });
   if (!row) throw notFound("Category not found");
-  return row;
+  return { id: row._id.toString(), name: row.name };
 }
 
 categoriesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
-    res.json(await listCategories(getDb(), auth(req).householdId));
+    res.json(await listCategories(auth(req).householdId));
   }),
 );
 
@@ -54,25 +40,22 @@ categoriesRouter.post(
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
     const input = parseOrThrow(categoryCreateSchema, req.body);
-    const db = getDb();
+    const nameLower = input.name.toLowerCase();
 
-    const [existing] = await db
-      .select({ id: categories.id })
-      .from(categories)
-      .where(and(eq(categories.householdId, householdId), sql`${categories.name} = ${input.name} COLLATE NOCASE`));
+    const existing = await Category.findOne({ householdId, nameLower });
     if (existing) throw conflict(`You already have a category called "${input.name}"`);
 
-    const [next] = await db
-      .select({ n: sql<number>`COALESCE(MAX(${categories.sortOrder}), -1) + 1` })
-      .from(categories)
-      .where(eq(categories.householdId, householdId));
+    const top = await Category.findOne({ householdId }).sort({ sortOrder: -1 });
+    const sortOrder = top ? top.sortOrder + 1 : 0;
 
-    const [created] = await db
-      .insert(categories)
-      .values({ householdId, name: input.name, sortOrder: next!.n })
-      .returning({ id: categories.id });
+    const created = await Category.create({ householdId, name: input.name, nameLower, sortOrder });
 
-    res.status(201).json({ id: created!.id, name: input.name, sortOrder: next!.n, itemCount: 0 } satisfies Category);
+    res.status(201).json({
+      id: created._id.toString(),
+      name: input.name,
+      sortOrder,
+      itemCount: 0,
+    } satisfies CategoryShape);
   }),
 );
 
@@ -80,32 +63,23 @@ categoriesRouter.patch(
   "/:id",
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
-    const id = Number(req.params.id);
-    const db = getDb();
-    await requireCategory(db, householdId, id);
+    const id = String(req.params.id);
+    await requireCategory(householdId, id);
 
     const input = parseOrThrow(categoryUpdateSchema, req.body);
 
     if (input.name !== undefined) {
-      const [clash] = await db
-        .select({ id: categories.id })
-        .from(categories)
-        .where(
-          and(
-            eq(categories.householdId, householdId),
-            sql`${categories.name} = ${input.name} COLLATE NOCASE`,
-            ne(categories.id, id),
-          ),
-        );
+      const nameLower = input.name.toLowerCase();
+      const clash = await Category.findOne({ householdId, nameLower, _id: { $ne: id } });
       if (clash) throw conflict(`You already have a category called "${input.name}"`);
-      await db.update(categories).set({ name: input.name }).where(eq(categories.id, id));
+      await Category.updateOne({ _id: id }, { $set: { name: input.name, nameLower } });
     }
 
     if (input.sortOrder !== undefined) {
-      await db.update(categories).set({ sortOrder: input.sortOrder }).where(eq(categories.id, id));
+      await Category.updateOne({ _id: id }, { $set: { sortOrder: input.sortOrder } });
     }
 
-    const list = await listCategories(db, householdId);
+    const list = await listCategories(householdId);
     res.json(list.find((category) => category.id === id));
   }),
 );
@@ -118,30 +92,25 @@ categoriesRouter.delete(
   "/:id",
   asyncHandler(async (req, res) => {
     const { householdId } = auth(req);
-    const id = Number(req.params.id);
-    const db = getDb();
-    await requireCategory(db, householdId, id);
+    const id = String(req.params.id);
+    await requireCategory(householdId, id);
 
-    const [inUse] = await db.select({ n: sql<number>`COUNT(*)` }).from(items).where(eq(items.categoryId, id));
+    const inUse = await Item.countDocuments({ categoryId: id });
 
-    if (inUse!.n > 0) {
-      const reassignRaw = req.query["reassignTo"];
-      if (reassignRaw === undefined) {
-        throw badRequest(`${inUse!.n} item${inUse!.n === 1 ? "" : "s"} still use this category. Reassign them first.`);
+    if (inUse > 0) {
+      const reassignTo = req.query["reassignTo"];
+      if (typeof reassignTo !== "string") {
+        throw badRequest(`${inUse} item${inUse === 1 ? "" : "s"} still use this category. Reassign them first.`);
       }
+      if (reassignTo === id) throw badRequest("Pick a different category to move items into");
+      await requireCategory(householdId, reassignTo);
 
-      const reassignTo = Number(reassignRaw);
-      if (!Number.isInteger(reassignTo) || reassignTo === id) {
-        throw badRequest("Pick a different category to move items into");
-      }
-      await requireCategory(db, householdId, reassignTo);
-
-      await db.transaction(async (tx) => {
-        await tx.update(items).set({ categoryId: reassignTo }).where(eq(items.categoryId, id));
-        await tx.delete(categories).where(eq(categories.id, id));
+      await withTransaction(async (session) => {
+        await Item.updateMany({ categoryId: id }, { $set: { categoryId: reassignTo } }, { session });
+        await Category.deleteOne({ _id: id }, { session });
       });
     } else {
-      await db.delete(categories).where(eq(categories.id, id));
+      await Category.deleteOne({ _id: id });
     }
 
     res.status(204).end();

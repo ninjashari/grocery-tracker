@@ -37,7 +37,7 @@ export function PriceHistory() {
     if (!id) return;
     setLoading(true);
     api
-      .priceHistory(Number(id))
+      .priceHistory(id)
       .then(setHistory)
       .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Could not load price history"))
       .finally(() => setLoading(false));

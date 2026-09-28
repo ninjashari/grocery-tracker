@@ -1,41 +1,47 @@
-import { createClient } from "@libsql/client";
-import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import * as schema from "./schema.ts";
-
-export type DB = LibSQLDatabase<typeof schema>;
-export type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
-/** Every `lib/*.ts` function takes one of these instead of calling `getDb()` itself, so
- * which connection a query runs on — the top-level DB, or a transaction that must see it
- * — is visible and type-checked at the call site rather than implicit. */
-export type Executor = DB | Tx;
-
-let _db: DB | null = null;
-
-export function getDb(): DB {
-  if (!_db) {
-    const client = createClient(resolveDbConfig());
-    _db = drizzle(client, { schema });
-  }
-  return _db;
-}
+import mongoose, { type ClientSession } from "mongoose";
 
 /**
- * `TURSO_DATABASE_URL` selects the target: unset defaults to a local embedded file (no
- * account, no network — `npm run dev` needs nothing beyond `npm install`); a
- * `libsql://...` URL plus `TURSO_AUTH_TOKEN` points at a real Turso database, which is
- * what makes data survive a Render deploy (Render's free tier has no persistent disk —
- * local files don't survive a redeploy either way, network storage does).
+ * `MONGODB_URI` selects the target. There's no local zero-setup fallback the way the old
+ * SQLite file DB had — Atlas's free tier is also zero-cost, so both local dev and
+ * production point at a real Atlas cluster (different databases: see README/.env.example).
  */
-export function resolveDbConfig(): { url: string; authToken?: string } {
-  const url = process.env.TURSO_DATABASE_URL ?? "file:./data/grocery.db";
+function resolveMongoUri(): string {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error("MONGODB_URI is not set");
+  return uri;
+}
 
-  if (url.startsWith("file:") && url !== "file::memory:") {
-    // createClient does not create the parent directory for a local file target.
-    mkdirSync(dirname(url.slice("file:".length)), { recursive: true });
+let connectPromise: Promise<typeof mongoose> | null = null;
+
+/** Lazy singleton, memoized on the connection promise itself so concurrent early callers
+ * (e.g. the health check racing route middleware at boot) share one connection attempt. */
+export function connectDb(): Promise<typeof mongoose> {
+  if (!connectPromise) {
+    connectPromise = mongoose.connect(resolveMongoUri());
   }
+  return connectPromise;
+}
 
-  const authToken = process.env.TURSO_AUTH_TOKEN;
-  return authToken ? { url, authToken } : { url };
+export async function disconnectDb(): Promise<void> {
+  if (connectPromise) {
+    await mongoose.disconnect();
+    connectPromise = null;
+  }
+}
+
+/** Wraps a Mongo multi-document transaction. Needed wherever a write touches more than
+ * one collection and must be all-or-nothing (e.g. resolving/creating an item before
+ * referencing it on a bill, or creating a household + its seeded categories + its first
+ * user together). Requires a replica set, which Atlas's free tier already is. */
+export async function withTransaction<T>(fn: (session: ClientSession) => Promise<T>): Promise<T> {
+  const session = await mongoose.startSession();
+  try {
+    let result: T;
+    await session.withTransaction(async () => {
+      result = await fn(session);
+    });
+    return result!;
+  } finally {
+    await session.endSession();
+  }
 }

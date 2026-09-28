@@ -1,7 +1,8 @@
-import { and, eq, sql } from "drizzle-orm";
-import type { DB, Executor } from "../db/connection.ts";
-import { bills, billLines, categories, items } from "../db/schema.ts";
+import type { ClientSession } from "mongoose";
+import { withTransaction } from "../db/connection.ts";
+import { Bill, Category, Item } from "../db/models/index.ts";
 import { badRequest } from "./http.ts";
+import { refreshLastPurchase } from "./bills.ts";
 import { findOrCreateItem } from "./items.ts";
 import { parseCsvWithHeader } from "../../shared/csv.ts";
 import { derivedUnitPricePaise, lineTotalPaise, rupeesToPaise } from "../../shared/money.ts";
@@ -79,7 +80,7 @@ function memoizedItemExists(check: (brand: string, name: string) => Promise<bool
  * Both the dry run and the commit call this, so the preview the user approves is exactly
  * what gets written - there is no second, divergent parse.
  */
-export async function stageImport(executor: Executor, householdId: number, csv: string): Promise<Staged> {
+export async function stageImport(householdId: string, csv: string): Promise<Staged> {
   const { headers, rows } = parseCsvWithHeader(csv);
 
   if (rows.length === 0) throw badRequest("That CSV has no data rows");
@@ -90,33 +91,17 @@ export async function stageImport(executor: Executor, householdId: number, csv: 
   }
 
   const itemExists = memoizedItemExists(async function checkItem(brand, name) {
-    const [row] = await executor
-      .select({ id: items.id })
-      .from(items)
-      .where(
-        and(
-          eq(items.householdId, householdId),
-          sql`${items.brand} = ${brand} COLLATE NOCASE`,
-          sql`${items.name} = ${name} COLLATE NOCASE`,
-        ),
-      );
-    return row !== undefined;
+    return Item.exists({ householdId, brandLower: brand.toLowerCase(), nameLower: name.toLowerCase() }).then(
+      Boolean,
+    );
   });
 
   const categoryExists = memoizedExists(async function checkCategory(name) {
-    const [row] = await executor
-      .select({ id: categories.id })
-      .from(categories)
-      .where(and(eq(categories.householdId, householdId), sql`${categories.name} = ${name} COLLATE NOCASE`));
-    return row !== undefined;
+    return Category.exists({ householdId, nameLower: name.toLowerCase() }).then(Boolean);
   });
 
   const shopExists = memoizedExists(async function checkShop(name) {
-    const [row] = await executor
-      .select({ id: bills.id })
-      .from(bills)
-      .where(and(eq(bills.householdId, householdId), sql`${bills.shop} = ${name} COLLATE NOCASE`));
-    return row !== undefined;
+    return Bill.exists({ householdId, shopLower: name.toLowerCase() }).then(Boolean);
   });
 
   const staged: Staged = {
@@ -235,81 +220,56 @@ export function toPreview(staged: Staged): ImportPreview {
  * Writes a staged import. Rows that failed validation are skipped, not fatal - a single
  * bad row in a long export should not block the other 200.
  */
-export async function commitImport(
-  db: DB,
-  householdId: number,
-  userId: number,
-  staged: Staged,
-): Promise<ImportResult> {
+export async function commitImport(householdId: string, userId: string, staged: Staged): Promise<ImportResult> {
   const result: ImportResult = { billsCreated: 0, linesCreated: 0, itemsCreated: 0, categoriesCreated: 0 };
+  const affectedItemIds = new Set<string>();
 
-  return db.transaction(async function runCommit(tx) {
-    const categoryIds = new Map<string, number>();
+  const committed = await withTransaction(async (session) => {
+    const categoryIds = new Map<string, string>();
 
-    async function categoryIdFor(name: string): Promise<number | null> {
+    async function categoryIdFor(name: string, tx: ClientSession): Promise<string | null> {
       if (!name) return null;
       const cacheKey = name.toLowerCase();
       const cached = categoryIds.get(cacheKey);
       if (cached !== undefined) return cached;
 
-      const [found] = await tx
-        .select({ id: categories.id })
-        .from(categories)
-        .where(and(eq(categories.householdId, householdId), sql`${categories.name} = ${name} COLLATE NOCASE`));
+      const found = await Category.findOne({ householdId, nameLower: cacheKey }).session(tx);
       if (found) {
-        categoryIds.set(cacheKey, found.id);
-        return found.id;
+        const id = found._id.toString();
+        categoryIds.set(cacheKey, id);
+        return id;
       }
 
-      const [sort] = await tx
-        .select({ n: sql<number>`COALESCE(MAX(${categories.sortOrder}), -1) + 1` })
-        .from(categories)
-        .where(eq(categories.householdId, householdId));
+      const top = await Category.findOne({ householdId }).sort({ sortOrder: -1 }).session(tx);
+      const nextSortOrder = top ? top.sortOrder + 1 : 0;
 
-      const [created] = await tx
-        .insert(categories)
-        .values({ householdId, name, sortOrder: sort!.n })
-        .returning({ id: categories.id });
+      const [created] = await Category.create(
+        [{ householdId, name, nameLower: cacheKey, sortOrder: nextSortOrder }],
+        { session: tx },
+      );
       result.categoriesCreated += 1;
-      categoryIds.set(cacheKey, created!.id);
-      return created!.id;
+      const id = created!._id.toString();
+      categoryIds.set(cacheKey, id);
+      return id;
     }
 
-    const [itemsBeforeRow] = await tx
-      .select({ n: sql<number>`COUNT(*)` })
-      .from(items)
-      .where(eq(items.householdId, householdId));
-    const itemsBefore = itemsBeforeRow!.n;
+    const itemsBefore = await Item.countDocuments({ householdId }).session(session);
 
     for (const bill of staged.bills) {
       const statedTotal = bill.statedTotalPaise ?? bill.lines.reduce((sum, line) => sum + line.lineTotalPaise, 0);
 
-      const [created] = await tx
-        .insert(bills)
-        .values({
-          householdId,
-          billDate: bill.billDate,
-          shop: bill.shop,
-          paymentMethod: bill.paymentMethod,
-          statedTotalPaise: statedTotal,
-          note: bill.note,
-          createdBy: userId,
-        })
-        .returning({ id: bills.id });
-      result.billsCreated += 1;
-
+      const lines = [];
       for (const line of bill.lines) {
-        const categoryId = await categoryIdFor(line.categoryName);
-        const itemId = await findOrCreateItem(tx, householdId, {
-          brand: line.brand,
-          name: line.itemName,
-          categoryId,
-          defaultUnit: line.unit,
-        });
+        const categoryId = await categoryIdFor(line.categoryName, session);
+        const itemId = await findOrCreateItem(
+          householdId,
+          { brand: line.brand, name: line.itemName, categoryId, defaultUnit: line.unit },
+          session,
+        );
+        affectedItemIds.add(itemId);
         const { baseQuantity, baseUnit } = toBaseQuantity(line.quantity, line.unit);
         const unitPricePaise = derivedUnitPricePaise(line.lineTotalPaise, line.quantity);
-        await tx.insert(billLines).values({
-          billId: created!.id,
+        lines.push({
           itemId,
           quantity: line.quantity,
           unit: line.unit,
@@ -320,13 +280,31 @@ export async function commitImport(
         });
         result.linesCreated += 1;
       }
+
+      await Bill.create(
+        [
+          {
+            householdId,
+            billDate: bill.billDate,
+            shop: bill.shop,
+            shopLower: bill.shop.toLowerCase(),
+            paymentMethod: bill.paymentMethod,
+            statedTotalPaise: statedTotal,
+            note: bill.note,
+            createdBy: userId,
+            lines,
+          },
+        ],
+        { session },
+      );
+      result.billsCreated += 1;
     }
 
-    const [itemsAfterRow] = await tx
-      .select({ n: sql<number>`COUNT(*)` })
-      .from(items)
-      .where(eq(items.householdId, householdId));
-    result.itemsCreated = itemsAfterRow!.n - itemsBefore;
+    const itemsAfter = await Item.countDocuments({ householdId }).session(session);
+    result.itemsCreated = itemsAfter - itemsBefore;
     return result;
   });
+
+  await refreshLastPurchase([...affectedItemIds]);
+  return committed;
 }

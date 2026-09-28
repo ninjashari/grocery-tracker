@@ -87,7 +87,7 @@ export type Summary = {
   previousMonth: { month: string; totalPaise: number } | null;
 };
 
-export type Member = { id: number; email: string; name: string; createdAt: string };
+export type Member = { id: string; email: string; name: string; createdAt: string };
 
 export const api = {
   signup: (body: { email: string; password: string; name: string; householdName: string }) =>
@@ -102,41 +102,41 @@ export const api = {
 
   categories: () => request<Category[]>("/categories"),
   createCategory: (name: string) => request<Category>("/categories", { method: "POST", body: { name } }),
-  updateCategory: (id: number, body: { name?: string; sortOrder?: number }) =>
+  updateCategory: (id: string, body: { name?: string; sortOrder?: number }) =>
     request<Category>(`/categories/${id}`, { method: "PATCH", body }),
-  deleteCategory: (id: number, reassignTo?: number) =>
+  deleteCategory: (id: string, reassignTo?: string) =>
     request<void>(`/categories/${id}${qs({ reassignTo })}`, { method: "DELETE" }),
 
-  items: (params: { q?: string; categoryId?: number; includeArchived?: boolean } = {}) =>
+  items: (params: { q?: string; categoryId?: string; includeArchived?: boolean } = {}) =>
     request<Item[]>(`/items${qs(params)}`),
-  item: (id: number) => request<Item>(`/items/${id}`),
+  item: (id: string) => request<Item>(`/items/${id}`),
   createItem: (body: ItemCreateInput) => request<Item>("/items", { method: "POST", body }),
-  updateItem: (id: number, body: ItemUpdateInput) =>
+  updateItem: (id: string, body: ItemUpdateInput) =>
     request<Item>(`/items/${id}`, { method: "PATCH", body }),
-  deleteItem: (id: number) => request<{ archived: true; item: Item } | void>(`/items/${id}`, { method: "DELETE" }),
+  deleteItem: (id: string) => request<{ archived: true; item: Item } | void>(`/items/${id}`, { method: "DELETE" }),
   shops: () => request<Shop[]>("/items/shops"),
-  itemBills: (itemId: number) => request<ItemPurchase[]>(`/items/${itemId}/bills`),
+  itemBills: (itemId: string) => request<ItemPurchase[]>(`/items/${itemId}/bills`),
 
   bills: (
     params: {
       from?: string;
       to?: string;
       shop?: string;
-      categoryId?: number;
+      categoryId?: string;
       paymentMethod?: PaymentMethod;
       limit?: number;
       offset?: number;
     } = {},
   ) =>
     request<BillSummary[]>(`/bills${qs(params)}`),
-  bill: (id: number) => request<Bill>(`/bills/${id}`),
+  bill: (id: string) => request<Bill>(`/bills/${id}`),
   createBill: (body: BillInput) => request<Bill>("/bills", { method: "POST", body }),
-  updateBill: (id: number, body: BillInput) => request<Bill>(`/bills/${id}`, { method: "PATCH", body }),
-  deleteBill: (id: number) => request<void>(`/bills/${id}`, { method: "DELETE" }),
+  updateBill: (id: string, body: BillInput) => request<Bill>(`/bills/${id}`, { method: "PATCH", body }),
+  deleteBill: (id: string) => request<void>(`/bills/${id}`, { method: "DELETE" }),
 
-  spend: (params: { from?: string; to?: string; groupBy?: SpendGrouping; categoryId?: number } = {}) =>
+  spend: (params: { from?: string; to?: string; groupBy?: SpendGrouping; categoryId?: string } = {}) =>
     request<SpendReport>(`/reports/spend${qs(params)}`),
-  priceHistory: (itemId: number) => request<PriceHistory>(`/reports/price-history${qs({ itemId })}`),
+  priceHistory: (itemId: string) => request<PriceHistory>(`/reports/price-history${qs({ itemId })}`),
   priceHistoryAllBrands: (name: string) =>
     request<PriceHistoryByName>(`/reports/price-history-all-brands${qs({ name })}`),
   topItems: (params: { from?: string; to?: string; metric?: "spend" | "quantity"; limit?: number } = {}) =>

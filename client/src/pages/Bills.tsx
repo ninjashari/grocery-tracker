@@ -10,7 +10,7 @@ export function Bills() {
   const navigate = useNavigate();
   const [bills, setBills] = useState<BillSummary[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [expanded, setExpanded] = useState<Record<number, Bill>>({});
+  const [expanded, setExpanded] = useState<Record<string, Bill>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,7 +42,7 @@ export function Bills() {
         from: from || undefined,
         to: to || undefined,
         shop: shop || undefined,
-        categoryId: categoryId ? Number(categoryId) : undefined,
+        categoryId: categoryId || undefined,
         paymentMethod: paymentMethod ? (paymentMethod as PaymentMethod) : undefined,
       })
       .then(setBills)
@@ -56,7 +56,7 @@ export function Bills() {
     api.categories().then(setCategories).catch(() => {});
   }, []);
 
-  async function toggle(id: number) {
+  async function toggle(id: string) {
     if (expanded[id]) {
       setExpanded((current) => {
         const next = { ...current };

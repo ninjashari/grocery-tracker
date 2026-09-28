@@ -15,6 +15,9 @@ const paise = z.number().int("Amount must be a whole number of paise").min(0, "A
 
 const trimmed = (max: number) => z.string().trim().max(max);
 
+/** A Mongo ObjectId, carried as its 24-character hex string form everywhere outside the DB layer. */
+const objectId = z.string().regex(/^[0-9a-f]{24}$/i, "Not a valid id");
+
 /* ---------------------------------- auth ---------------------------------- */
 
 export const signupSchema = z.object({
@@ -51,14 +54,14 @@ export const categoryUpdateSchema = z.object({
 export const itemCreateSchema = z.object({
   brand: trimmed(80).default(""),
   name: trimmed(120).min(1, "Item name is required"),
-  categoryId: z.number().int().positive().nullable().default(null),
+  categoryId: objectId.nullable().default(null),
   defaultUnit: z.enum(UNITS).default("pcs"),
 });
 
 export const itemUpdateSchema = z.object({
   brand: trimmed(80).optional(),
   name: trimmed(120).min(1, "Item name is required").optional(),
-  categoryId: z.number().int().positive().nullable().optional(),
+  categoryId: objectId.nullable().optional(),
   defaultUnit: z.enum(UNITS).optional(),
   archived: z.boolean().optional(),
 });
@@ -75,7 +78,7 @@ export const itemUpdateSchema = z.object({
  */
 export const billLineInputSchema = z
   .object({
-    itemId: z.number().int().positive().optional(),
+    itemId: objectId.optional(),
     newItem: itemCreateSchema.optional(),
     quantity: z.number().positive("Quantity must be greater than zero").max(1_000_000),
     unit: z.enum(UNITS),
@@ -99,7 +102,7 @@ export const billQuerySchema = z.object({
   from: isoDate.optional(),
   to: isoDate.optional(),
   shop: z.string().trim().max(100).optional(),
-  categoryId: z.coerce.number().int().positive().optional(),
+  categoryId: objectId.optional(),
   paymentMethod: z.enum(PAYMENT_METHODS).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
   offset: z.coerce.number().int().min(0).default(0),
@@ -114,11 +117,11 @@ export const spendQuerySchema = z.object({
   from: isoDate.optional(),
   to: isoDate.optional(),
   groupBy: z.enum(SPEND_GROUPINGS).default("month"),
-  categoryId: z.coerce.number().int().positive().optional(),
+  categoryId: objectId.optional(),
 });
 
 export const priceHistoryQuerySchema = z.object({
-  itemId: z.coerce.number().int().positive(),
+  itemId: objectId,
 });
 
 export const priceHistoryByNameQuerySchema = z.object({

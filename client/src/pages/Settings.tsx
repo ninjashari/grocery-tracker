@@ -291,12 +291,12 @@ function ReassignDialog({
   onSaved: () => void;
 }) {
   const options = categories.filter((entry) => entry.id !== category.id);
-  const [target, setTarget] = useState(options[0] ? String(options[0].id) : "");
+  const [target, setTarget] = useState(options[0] ? options[0].id : "");
   const [error, setError] = useState<string | null>(null);
 
   async function confirm() {
     try {
-      await api.deleteCategory(category.id, Number(target));
+      await api.deleteCategory(category.id, target);
       onSaved();
     } catch (caught) {
       setError(caught instanceof ApiRequestError ? caught.message : "Could not delete");
