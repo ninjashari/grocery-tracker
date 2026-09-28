@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api.ts";
+import { usePersistedSearchParams } from "../hooks/usePersistedSearchParams.ts";
 import { Card, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
 import { PAYMENT_METHODS, type PaymentMethod } from "@shared/schemas.ts";
@@ -14,7 +15,7 @@ export function Bills() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = usePersistedSearchParams("gt:bills-filters");
   const from = searchParams.get("from") ?? "";
   const to = searchParams.get("to") ?? "";
   const shop = searchParams.get("shop") ?? "";

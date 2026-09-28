@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, ApiRequestError } from "../api.ts";
+import { usePersistedSearchParams } from "../hooks/usePersistedSearchParams.ts";
+import { usePersistedState } from "../hooks/usePersistedState.ts";
 import { Card, Empty, ErrorBanner, Loading, Modal, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
 import { UNITS, type Unit } from "@shared/units.ts";
@@ -10,10 +12,10 @@ export function Items() {
   const navigate = useNavigate();
   const [items, setItems] = useState<Item[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [query, setQuery] = useState("");
-  const [includeArchived, setIncludeArchived] = useState(false);
+  const [query, setQuery] = usePersistedState("gt:items-query", "");
+  const [includeArchived, setIncludeArchived] = usePersistedState("gt:items-include-archived", false);
 
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = usePersistedSearchParams("gt:items-filters");
   const categoryId = searchParams.get("categoryId") ?? "";
   function setCategoryId(value: string) {
     setSearchParams(
