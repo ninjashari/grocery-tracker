@@ -52,7 +52,14 @@ export function PriceHistory() {
   }));
 
   const pickableItems = items.filter((item) => item.purchaseCount > 1);
-  const subtitle = history ? (history.item.brand ? `${history.item.brand} ${history.item.name}` : history.item.name) : undefined;
+  const subtitle = history
+    ? [
+        history.item.brand ? `${history.item.brand} ${history.item.name}` : history.item.name,
+        history.item.packSize !== null ? `${history.item.packSize} ${history.item.defaultUnit}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : undefined;
 
   if (loading && !history) return <Loading />;
 
@@ -60,7 +67,9 @@ export function PriceHistory() {
     <>
       <PageHead title="Price history" subtitle={subtitle ?? "How an item's price has moved over time."} />
 
-      {history && <PriceHistoryTabs itemId={history.item.id} categoryId={history.item.categoryId} />}
+      {history && (
+        <PriceHistoryTabs itemId={history.item.id} categoryId={history.item.categoryId} itemName={history.item.name} />
+      )}
 
       <ErrorBanner error={error} />
 

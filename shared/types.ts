@@ -25,6 +25,8 @@ export type Item = {
   categoryId: string | null;
   categoryName: string | null;
   defaultUnit: Unit;
+  /** Package size in `defaultUnit`'s terms, e.g. defaultUnit "ml" + packSize 500 = "500 ml". */
+  packSize: number | null;
   archived: boolean;
   /** Unit price of the most recent purchase, used to prefill bill entry. */
   lastUnitPricePaise: number | null;
@@ -120,7 +122,7 @@ export type PriceHistory = {
   changeVsPreviousPct: number | null;
 };
 
-export type PricePointWithBrand = PricePoint & { brand: string };
+export type PricePointWithBrand = PricePoint & { brand: string; packSize: number | null; packUnit: Unit };
 
 /** Same shape as PriceHistory, but merged across every brand sharing an item's name —
  * there's no single Item to embed since brand varies per point. */

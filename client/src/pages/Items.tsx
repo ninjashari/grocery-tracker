@@ -180,7 +180,7 @@ export function Items() {
                       )}
                     </td>
                     <td className="small muted" data-label="Unit">
-                      {item.defaultUnit}
+                      {item.packSize !== null ? `${item.packSize} ${item.defaultUnit}` : item.defaultUnit}
                     </td>
                     <td className="num-cell mono" data-label="Last total">
                       {item.lastLineTotalPaise === null ? (
@@ -282,6 +282,7 @@ function ItemDialog({
   const [name, setName] = useState(item?.name ?? "");
   const [categoryId, setCategoryId] = useState(item?.categoryId ?? "");
   const [defaultUnit, setDefaultUnit] = useState<Unit>(item?.defaultUnit ?? "pcs");
+  const [packSize, setPackSize] = useState(item?.packSize !== null && item?.packSize !== undefined ? String(item.packSize) : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -293,6 +294,7 @@ function ItemDialog({
       name: name.trim(),
       categoryId: categoryId === "" ? null : categoryId,
       defaultUnit,
+      packSize: packSize.trim() === "" ? null : Number(packSize),
     };
     try {
       if (item) await api.updateItem(item.id, payload);
@@ -349,6 +351,19 @@ function ItemDialog({
               </option>
             ))}
           </select>
+        </div>
+        <div>
+          <label htmlFor="item-pack-size">Pack size</label>
+          <input
+            id="item-pack-size"
+            type="number"
+            min="0"
+            step="any"
+            inputMode="decimal"
+            value={packSize}
+            onChange={(event) => setPackSize(event.target.value)}
+            placeholder={`e.g. 500 (${defaultUnit})`}
+          />
         </div>
       </div>
 

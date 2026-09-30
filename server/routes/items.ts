@@ -6,6 +6,7 @@ import { auth } from "../middleware/auth.ts";
 import {
   assertCategoryInHousehold,
   assertItemNameFree,
+  escapeRegex,
   getItem,
   listItems,
   requireItem,
@@ -54,6 +55,33 @@ itemsRouter.get(
   }),
 );
 
+/** Distinct item names (irrespective of brand), for the all-brand comparison page's
+ * name-only picker — unlike "/" this never exposes brand, since picking a name there is
+ * meant to be brand-agnostic. */
+itemsRouter.get(
+  "/names",
+  asyncHandler(async (req, res) => {
+    const { householdId } = auth(req);
+    const q = typeof req.query["q"] === "string" ? req.query["q"].trim() : undefined;
+
+    const rows = await Item.aggregate([
+      { $match: { householdId: new Types.ObjectId(householdId), archived: false } },
+      ...(q ? [{ $match: { nameLower: { $regex: escapeRegex(q.toLowerCase()) } } }] : []),
+      {
+        $group: {
+          _id: "$nameLower",
+          name: { $first: "$name" },
+          purchaseCount: { $sum: "$purchaseCount" },
+        },
+      },
+      { $match: { purchaseCount: { $gt: 1 } } },
+      { $sort: { name: 1 } },
+      { $project: { name: 1, purchaseCount: 1, _id: 0 } },
+    ]);
+    res.json(rows);
+  }),
+);
+
 itemsRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
@@ -89,6 +117,7 @@ itemsRouter.post(
       nameLower: input.name.toLowerCase(),
       categoryId: input.categoryId,
       defaultUnit: input.defaultUnit,
+      packSize: input.packSize,
     });
 
     res.status(201).json(await getItem(householdId, created._id.toString()));
@@ -120,6 +149,7 @@ itemsRouter.patch(
           nameLower: name.toLowerCase(),
           categoryId: input.categoryId !== undefined ? input.categoryId : current.categoryId,
           defaultUnit: input.defaultUnit ?? current.defaultUnit,
+          packSize: input.packSize !== undefined ? input.packSize : current.packSize,
           archived: input.archived ?? current.archived,
         },
       },

@@ -4,7 +4,7 @@ import { conflict, notFound } from "./http.ts";
 import type { Item as ItemShape } from "../../shared/types.ts";
 import type { Unit } from "../../shared/units.ts";
 
-function escapeRegex(value: string): string {
+export function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
@@ -16,6 +16,7 @@ type ItemDocLike = {
   name: string;
   categoryId: PopulatedCategory | { toString(): string } | null;
   defaultUnit: string;
+  packSize: number | null;
   archived: boolean;
   lastPurchase: {
     unitPricePaise: number;
@@ -42,6 +43,7 @@ function toItem(doc: ItemDocLike): ItemShape {
     categoryId,
     categoryName: category?.name ?? null,
     defaultUnit: doc.defaultUnit as Unit,
+    packSize: doc.packSize,
     archived: doc.archived,
     lastUnitPricePaise: doc.lastPurchase?.unitPricePaise ?? null,
     lastUnit: (doc.lastPurchase?.unit as Unit | undefined) ?? null,

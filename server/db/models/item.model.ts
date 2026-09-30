@@ -22,6 +22,10 @@ const itemSchema = new Schema(
     nameLower: { type: String, required: true },
     categoryId: { type: Schema.Types.ObjectId, ref: "Category", default: null, index: true },
     defaultUnit: { type: String, required: true, default: "pcs" },
+    // Package size in `defaultUnit`'s terms, e.g. defaultUnit "ml" + packSize 500 = "500 ml".
+    // Catalog-level (unlike the per-purchase baseQuantity on bill lines) so it can be shown
+    // next to brand when comparing prices across differently-sized packages.
+    packSize: { type: Number, default: null },
     archived: { type: Boolean, required: true, default: false },
     legacyId: { type: Number, index: true, sparse: true },
     // Denormalized so `listItems` (bill entry's most common read) is a plain find() —

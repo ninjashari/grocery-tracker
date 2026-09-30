@@ -5,7 +5,15 @@ import { NavLink } from "react-router-dom";
  * trend. These are route changes, not client-state toggles, so it's a NavLink bar
  * rather than the Segmented control — visually matching it via the shared .segmented
  * class (`.segmented a.on` added alongside `.segmented button.on`). */
-export function PriceHistoryTabs({ itemId, categoryId }: { itemId: string | null; categoryId: string | null }) {
+export function PriceHistoryTabs({
+  itemId,
+  categoryId,
+  itemName,
+}: {
+  itemId: string | null;
+  categoryId: string | null;
+  itemName: string;
+}) {
   if (itemId === null) return null;
   return (
     <div className="segmented" role="group">
@@ -13,14 +21,14 @@ export function PriceHistoryTabs({ itemId, categoryId }: { itemId: string | null
         By brand
       </NavLink>
       <NavLink
-        to={`/items/${itemId}/price-history/all-brands`}
+        to={`/price-history/all-brands?name=${encodeURIComponent(itemName)}`}
         className={({ isActive }) => (isActive ? "on" : "")}
       >
         All brands
       </NavLink>
       {categoryId !== null && (
         <NavLink
-          to={`/categories/${categoryId}/spend-history?fromItem=${itemId}`}
+          to={`/categories/${categoryId}/spend-history?fromItem=${itemId}&fromItemName=${encodeURIComponent(itemName)}`}
           className={({ isActive }) => (isActive ? "on" : "")}
         >
           Category trend

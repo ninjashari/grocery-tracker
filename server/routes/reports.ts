@@ -194,6 +194,8 @@ reportsRouter.get(
           billDate: 1,
           shop: 1,
           brand: "$item.brand",
+          packSize: "$item.packSize",
+          packUnit: "$item.defaultUnit",
           quantity: "$lines.quantity",
           unit: "$lines.unit",
           unitPricePaise: "$lines.unitPricePaise",

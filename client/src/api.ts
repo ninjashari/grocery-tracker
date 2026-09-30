@@ -79,6 +79,8 @@ const qs = (params: Record<string, string | number | boolean | undefined>) => {
 
 export type Shop = { shop: string; billCount: number; lastUsed: string };
 
+export type ItemName = { name: string; purchaseCount: number };
+
 export type Summary = {
   totalPaise: number;
   billCount: number;
@@ -115,6 +117,7 @@ export const api = {
     request<Item>(`/items/${id}`, { method: "PATCH", body }),
   deleteItem: (id: string) => request<{ archived: true; item: Item } | void>(`/items/${id}`, { method: "DELETE" }),
   shops: () => request<Shop[]>("/items/shops"),
+  itemNames: (q?: string) => request<ItemName[]>(`/items/names${qs({ q })}`),
   itemBills: (itemId: string) => request<ItemPurchase[]>(`/items/${itemId}/bills`),
 
   bills: (

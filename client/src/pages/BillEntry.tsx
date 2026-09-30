@@ -9,7 +9,7 @@ import { PAYMENT_METHODS, type PaymentMethod } from "@shared/schemas.ts";
 import type { Category, Item } from "@shared/types.ts";
 import type { BillInput } from "@shared/schemas.ts";
 
-type NewItemDraft = { brand: string; name: string; categoryId: string | null; defaultUnit: Unit };
+type NewItemDraft = { brand: string; name: string; categoryId: string | null; defaultUnit: Unit; packSize: null };
 
 type LineDraft = {
   key: string;
@@ -644,6 +644,7 @@ function NewItemDialog({
               name: name.trim(),
               categoryId: categoryId === "" ? null : categoryId,
               defaultUnit,
+              packSize: null,
             })
           }
         >

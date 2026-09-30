@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
-import { api } from "../api.ts";
+import { api, type ItemName } from "../api.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
-import { PriceHistoryTabs } from "../components/PriceHistoryTabs.tsx";
 import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
 import { formatPaise } from "@shared/money.ts";
 import { BASE_PRICE_STEP } from "@shared/units.ts";
-import type { Item, PriceHistoryByName } from "@shared/types.ts";
+import type { PriceHistoryByName } from "@shared/types.ts";
 
 /** Recharts renders into SVG, so chart colours come from CSS variables resolved at runtime. */
 function cssVar(name: string, fallback: string): string {
@@ -15,40 +14,45 @@ function cssVar(name: string, fallback: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
-/** Same item name merged across every brand — "irrespective of brand" — as opposed to
- * PriceHistory.tsx's per-brand trend for one exact item. */
-export function ItemPriceHistoryAllBrands() {
-  const { id } = useParams<{ id: string }>();
+/**
+ * Standalone brand-agnostic price comparison: pick a product *name* (no brand attached)
+ * and see every brand's price for it merged onto one trend, with each purchase's brand and
+ * pack size shown so differently-sized packages stay easy to sanity-check.
+ */
+export function AllBrandsPriceHistory() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const name = searchParams.get("name") ?? "";
   const navigate = useNavigate();
 
-  const [items, setItems] = useState<Item[]>([]);
-  const [item, setItem] = useState<Item | null>(null);
+  const [names, setNames] = useState<ItemName[]>([]);
   const [history, setHistory] = useState<PriceHistoryByName | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const accent = useMemo(() => cssVar("--accent", "#2563eb"), []);
   const accentTeal = useMemo(() => cssVar("--accent-teal", "#0d9488"), []);
   const isPhone = useMediaQuery("(max-width: 640px)");
 
-  // Populates the item picker — only items with enough purchases to show a trend.
   useEffect(() => {
-    api.items().then(setItems).catch(() => {});
+    api.itemNames().then(setNames).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (!id) return;
+    if (!name) {
+      setHistory(null);
+      return;
+    }
     setLoading(true);
     api
-      .item(id)
-      .then((loadedItem) => {
-        setItem(loadedItem);
-        return api.priceHistoryAllBrands(loadedItem.name);
-      })
+      .priceHistoryAllBrands(name)
       .then(setHistory)
       .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Could not load price history"))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [name]);
+
+  function pickName(next: string) {
+    setSearchParams(next ? { name: next } : {}, { replace: true });
+  }
 
   const stepLabel = history?.baseUnit ? BASE_PRICE_STEP[history.baseUnit].label : "";
   const historyData = (history?.points ?? []).map((point) => ({
@@ -56,44 +60,34 @@ export function ItemPriceHistoryAllBrands() {
     rupees: point.basePricePaise / 100,
     shop: point.shop,
     brand: point.brand,
+    packLabel: point.packSize !== null ? `${point.packSize} ${point.packUnit}` : null,
     detail: `${point.quantity} ${point.unit} @ ${formatPaise(point.unitPricePaise)}/${point.unit}`,
   }));
 
-  const pickableItems = items.filter((entry) => entry.purchaseCount > 1);
   const subtitle = history ? `${history.name} · every brand` : undefined;
-
-  if (loading && !history) return <Loading />;
 
   return (
     <>
-      <PageHead title="Price history" subtitle={subtitle ?? "How this item's price has moved across every brand."} />
+      <PageHead
+        title="Compare brands"
+        subtitle={subtitle ?? "Pick a product to see how its price has moved across every brand that sells it."}
+      />
 
       <ErrorBanner error={error} />
 
-      {item && <PriceHistoryTabs itemId={item.id} categoryId={item.categoryId} />}
-
       <Card>
-        <CardHead title="Pick an item">
+        <CardHead title="Pick a product">
           <div style={{ minWidth: 260 }}>
-            <select
-              value={id ?? ""}
-              aria-label="Item"
-              onChange={(event) => {
-                if (event.target.value) navigate(`/items/${event.target.value}/price-history/all-brands`);
-              }}
-            >
-              <option value="">Pick an item…</option>
-              {pickableItems.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.brand ? `${entry.brand} ${entry.name}` : entry.name}
-                </option>
-              ))}
-            </select>
+            <NamePicker names={names} value={name} onPick={pickName} />
           </div>
         </CardHead>
 
         <div className="card-body">
-          {!history ? null : history.points.length < 2 ? (
+          {loading && !history ? (
+            <Loading />
+          ) : !name ? (
+            <Empty title="Pick a product name">Search above for a product to compare its price across brands.</Empty>
+          ) : !history ? null : history.points.length < 2 ? (
             <Empty title="Not enough purchases yet">
               {history.points.length === 0
                 ? "This item has never been bought, under any brand."
@@ -154,8 +148,12 @@ export function ItemPriceHistoryAllBrands() {
                     <Tooltip
                       formatter={(value) => [`₹${Number(value).toFixed(2)} ${stepLabel}`, "Price"]}
                       labelFormatter={(label, payload) => {
-                        const point = payload?.[0]?.payload as { shop?: string; brand?: string; detail?: string } | undefined;
-                        return point ? `${String(label)} · ${point.brand} · ${point.shop} · ${point.detail}` : label;
+                        const point = payload?.[0]?.payload as
+                          | { shop?: string; brand?: string; packLabel?: string | null; detail?: string }
+                          | undefined;
+                        if (!point) return label;
+                        const brandLabel = point.packLabel ? `${point.brand} (${point.packLabel})` : point.brand;
+                        return `${String(label)} · ${brandLabel} · ${point.shop} · ${point.detail}`;
                       }}
                       contentStyle={{
                         background: cssVar("--surface", "#fff"),
@@ -183,6 +181,7 @@ export function ItemPriceHistoryAllBrands() {
                     <tr>
                       <th>Date</th>
                       <th>Brand</th>
+                      <th>Pack size</th>
                       <th>Shop</th>
                       <th className="num-cell">Bought</th>
                       <th className="num-cell">Paid / unit</th>
@@ -202,6 +201,9 @@ export function ItemPriceHistoryAllBrands() {
                           </td>
                           <td className="small muted" data-label="Brand">
                             {point.brand || <span className="faint">—</span>}
+                          </td>
+                          <td className="small muted" data-label="Pack size">
+                            {point.packSize !== null ? `${point.packSize} ${point.packUnit}` : <span className="faint">—</span>}
                           </td>
                           <td data-label="Shop">
                             <Link to={`/bills?shop=${encodeURIComponent(point.shop)}`} className="link-chip small">
@@ -236,5 +238,82 @@ export function ItemPriceHistoryAllBrands() {
         </div>
       </Card>
     </>
+  );
+}
+
+/** Search-as-you-type picker over distinct item names only — never shows brand, since the
+ * whole point of this page is comparing a product irrespective of which brand sold it. */
+function NamePicker({
+  names,
+  value,
+  onPick,
+}: {
+  names: ItemName[];
+  value: string;
+  onPick: (name: string) => void;
+}) {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+
+  useEffect(() => {
+    setQuery(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocumentDown = (event: MouseEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocumentDown);
+    return () => document.removeEventListener("mousedown", onDocumentDown);
+  }, [open]);
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return names.filter((entry) => entry.name.toLowerCase().includes(q)).slice(0, 12);
+  }, [names, query]);
+
+  return (
+    <div className="combo" ref={wrapRef}>
+      <input
+        value={query}
+        placeholder="Search for a product…"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        autoComplete="off"
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+      />
+
+      {open && matches.length > 0 && (
+        <div className="combo-menu" id={listId} role="listbox">
+          {matches.map((entry) => (
+            <button
+              key={entry.name}
+              type="button"
+              role="option"
+              aria-selected={entry.name === value}
+              className={`combo-option${entry.name === value ? " active" : ""}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                setQuery(entry.name);
+                setOpen(false);
+                onPick(entry.name);
+              }}
+            >
+              <span>{entry.name}</span>
+              <span className="opt-sub">{entry.purchaseCount} purchases</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

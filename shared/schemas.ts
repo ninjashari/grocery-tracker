@@ -56,6 +56,7 @@ export const itemCreateSchema = z.object({
   name: trimmed(120).min(1, "Item name is required"),
   categoryId: objectId.nullable().default(null),
   defaultUnit: z.enum(UNITS).default("pcs"),
+  packSize: z.number().positive("Pack size must be greater than zero").nullable().default(null),
 });
 
 export const itemUpdateSchema = z.object({
@@ -63,6 +64,7 @@ export const itemUpdateSchema = z.object({
   name: trimmed(120).min(1, "Item name is required").optional(),
   categoryId: objectId.nullable().optional(),
   defaultUnit: z.enum(UNITS).optional(),
+  packSize: z.number().positive("Pack size must be greater than zero").nullable().optional(),
   archived: z.boolean().optional(),
 });
 

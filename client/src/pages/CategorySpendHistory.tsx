@@ -15,6 +15,7 @@ export function CategorySpendHistory() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const fromItem = searchParams.get("fromItem");
+  const fromItemName = searchParams.get("fromItemName") ?? "";
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [spend, setSpend] = useState<SpendReport | null>(null);
@@ -49,7 +50,7 @@ export function CategorySpendHistory() {
 
       <ErrorBanner error={error} />
 
-      {fromItem && <PriceHistoryTabs itemId={fromItem} categoryId={id ?? null} />}
+      {fromItem && <PriceHistoryTabs itemId={fromItem} categoryId={id ?? null} itemName={fromItemName} />}
 
       <Card>
         <CardHead title="Pick a category">
