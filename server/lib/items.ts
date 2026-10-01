@@ -1,5 +1,5 @@
-import { isValidObjectId, type ClientSession } from "mongoose";
-import { Category, Item } from "../db/models/index.ts";
+import { isValidObjectId, Types, type ClientSession } from "mongoose";
+import { Bill, Category, Item } from "../db/models/index.ts";
 import { conflict, notFound } from "./http.ts";
 import type { Item as ItemShape } from "../../shared/types.ts";
 import type { Unit } from "../../shared/units.ts";
@@ -78,7 +78,40 @@ export async function listItems(householdId: string, query: ItemQuery = {}): Pro
     .limit(query.limit ?? 500)
     .populate("categoryId", "name");
 
-  return docs.map((doc) => toItem(doc as unknown as ItemDocLike));
+  // purchaseCount/lastPurchase on the Item doc are a denormalized cache that can go stale
+  // (e.g. a bill edit/delete that stops referencing an item). Recompute live from bills,
+  // the source of truth, so the list always reflects reality rather than the cache.
+  const itemIds = docs.map((doc) => doc._id as Types.ObjectId);
+  const liveStats = await Bill.aggregate([
+    { $match: { householdId: new Types.ObjectId(householdId), "lines.itemId": { $in: itemIds } } },
+    { $unwind: "$lines" },
+    { $match: { "lines.itemId": { $in: itemIds } } },
+    { $sort: { billDate: -1, "lines._id": -1 } },
+    {
+      $group: {
+        _id: "$lines.itemId",
+        purchaseCount: { $sum: 1 },
+        latest: {
+          $first: {
+            unitPricePaise: "$lines.unitPricePaise",
+            unit: "$lines.unit",
+            billDate: "$billDate",
+            lineTotalPaise: "$lines.lineTotalPaise",
+            quantity: "$lines.quantity",
+          },
+        },
+      },
+    },
+  ]);
+  const statsByItemId = new Map(liveStats.map((row) => [row._id.toString(), row]));
+
+  return docs.map((doc) => {
+    const stats = statsByItemId.get(doc._id.toString());
+    const live = doc.toObject() as unknown as ItemDocLike;
+    live.purchaseCount = stats?.purchaseCount ?? 0;
+    live.lastPurchase = stats?.latest ?? null;
+    return toItem(live);
+  });
 }
 
 export async function getItem(householdId: string, id: string): Promise<ItemShape | null> {

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, type ItemName } from "../api.ts";
 import { useMediaQuery } from "../hooks/useMediaQuery.ts";
 import { Card, CardHead, Empty, ErrorBanner, Loading, PageHead } from "../components/ui.tsx";
@@ -170,7 +170,6 @@ export function AllBrandsPriceHistory() {
                       dot={{ r: 4, fill: accent }}
                       activeDot={{ r: 6 }}
                     />
-                    <Scatter dataKey="rupees" fill={accent} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -185,6 +184,7 @@ export function AllBrandsPriceHistory() {
                       <th>Shop</th>
                       <th className="num-cell">Bought</th>
                       <th className="num-cell">Paid / unit</th>
+                      <th className="num-cell">Total paid</th>
                       <th className="num-cell">Price {stepLabel}</th>
                     </tr>
                   </thead>
@@ -215,6 +215,9 @@ export function AllBrandsPriceHistory() {
                           </td>
                           <td className="num-cell mono" data-label="Paid / unit">
                             {formatPaise(point.unitPricePaise)}/{point.unit}
+                          </td>
+                          <td className="num-cell mono" data-label="Total paid">
+                            {formatPaise(point.lineTotalPaise)}
                           </td>
                           <td className="num-cell mono" data-label={`Price ${stepLabel}`}>
                             {/* One wrapper so this cell is a single flex item on mobile. */}

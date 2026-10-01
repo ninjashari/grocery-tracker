@@ -234,6 +234,11 @@ export async function saveBill(
 ): Promise<BillShape> {
   const affectedItemIds = new Set<string>();
 
+  if (billId !== undefined) {
+    const existing = await Bill.findOne({ _id: billId, householdId });
+    for (const line of existing?.lines ?? []) affectedItemIds.add(line.itemId.toString());
+  }
+
   const savedId = await withTransaction(async (session) => {
     const lines = [];
     for (const line of input.lines) {
@@ -282,8 +287,10 @@ export async function saveBill(
 }
 
 export async function deleteBill(householdId: string, id: string): Promise<void> {
-  await requireBill(householdId, id);
+  const bill = await Bill.findOne({ _id: id, householdId });
+  if (!bill) throw notFound("Bill not found");
+  const itemIds = [...new Set(bill.lines.map((line) => line.itemId.toString()))];
+
   await Bill.deleteOne({ _id: id, householdId });
-  // Any item whose lastPurchase pointed only at this bill now shows a stale prefill until
-  // its next purchase — accepted as a rare, low-stakes staleness (see refreshLastPurchase).
+  await refreshLastPurchase(itemIds);
 }
