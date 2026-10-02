@@ -11,6 +11,7 @@ import { Items } from "./pages/Items.tsx";
 import { PriceHistory } from "./pages/PriceHistory.tsx";
 import { AllBrandsPriceHistory } from "./pages/AllBrandsPriceHistory.tsx";
 import { ItemBillHistory } from "./pages/ItemBillHistory.tsx";
+import { ItemLineBulkEdit } from "./pages/ItemLineBulkEdit.tsx";
 import { CategorySpendHistory } from "./pages/CategorySpendHistory.tsx";
 import { Reports } from "./pages/Reports.tsx";
 import { DataPage } from "./pages/Data.tsx";
@@ -119,6 +120,7 @@ export function App() {
           <Route path="/items/:id/price-history" element={<PriceHistory />} />
           <Route path="/price-history/all-brands" element={<AllBrandsPriceHistory />} />
           <Route path="/items/:id/bills" element={<ItemBillHistory />} />
+          <Route path="/items/:id/bulk-edit" element={<ItemLineBulkEdit />} />
           <Route path="/categories/:id/spend-history" element={<CategorySpendHistory />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/data" element={<DataPage />} />

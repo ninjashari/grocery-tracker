@@ -3,7 +3,7 @@ import { withTransaction } from "../db/connection.ts";
 import { Bill, Item } from "../db/models/index.ts";
 import { notFound } from "./http.ts";
 import { findOrCreateItem } from "./items.ts";
-import { toBaseQuantity } from "../../shared/units.ts";
+import { toBaseQuantity, type Unit } from "../../shared/units.ts";
 import { derivedUnitPricePaise } from "../../shared/money.ts";
 import type { BillInput, PaymentMethod } from "../../shared/schemas.ts";
 import type { Bill as BillShape, BillLine, BillSummary, ItemPurchase } from "../../shared/types.ts";
@@ -86,6 +86,7 @@ export async function listBillLinesForItem(householdId: string, itemId: string):
     {
       $project: {
         billId: "$_id",
+        lineId: "$lines._id",
         billDate: 1,
         shop: 1,
         paymentMethod: 1,
@@ -102,7 +103,9 @@ export async function listBillLinesForItem(householdId: string, itemId: string):
     },
   ]);
 
-  return rows.map((row) => ({ ...row, billId: row.billId.toString() }) as ItemPurchase);
+  return rows.map(
+    (row) => ({ ...row, billId: row.billId.toString(), lineId: row.lineId.toString() }) as ItemPurchase,
+  );
 }
 
 type BillLineDoc = {
@@ -284,6 +287,40 @@ export async function saveBill(
 
   await refreshLastPurchase([...affectedItemIds]);
   return requireBill(householdId, savedId);
+}
+
+/**
+ * Fixes quantity/unit on specific lines of one item across one or more bills — e.g. a unit
+ * that was mis-entered the same way on every receipt. `lineTotalPaise` (what was actually
+ * paid) is never touched here; only the derived `unitPricePaise`/`baseQuantity`/`baseUnit`
+ * are recomputed, same as `saveBill` does for a normal edit.
+ */
+export async function bulkUpdateItemLines(
+  householdId: string,
+  itemId: string,
+  edits: { billId: string; lineId: string; quantity: number; unit: Unit }[],
+): Promise<ItemPurchase[]> {
+  await withTransaction(async (session) => {
+    for (const edit of edits) {
+      const bill = await Bill.findOne({ _id: edit.billId, householdId }).session(session);
+      if (!bill) throw notFound("Bill not found");
+
+      const line = bill.lines.id(edit.lineId);
+      if (!line || line.itemId.toString() !== itemId) throw notFound("Line not found");
+
+      const { baseQuantity, baseUnit } = toBaseQuantity(edit.quantity, edit.unit);
+      line.quantity = edit.quantity;
+      line.unit = edit.unit;
+      line.unitPricePaise = derivedUnitPricePaise(line.lineTotalPaise, edit.quantity);
+      line.baseQuantity = baseQuantity;
+      line.baseUnit = baseUnit;
+
+      await bill.save({ session });
+    }
+  });
+
+  await refreshLastPurchase([itemId]);
+  return listBillLinesForItem(householdId, itemId);
 }
 
 export async function deleteBill(householdId: string, id: string): Promise<void> {

@@ -632,6 +632,11 @@ tbody tr:last-child td {
   background: var(--surface-2);
 }
 
+/* Flags a row with unsaved edits (ItemLineBulkEdit.tsx). */
+tr.dirty {
+  background: var(--warn-soft);
+}
+
 /* Dashboard preview tables only — Bills.tsx/Items.tsx rows keep their existing
    button-only interaction, so this cursor affordance is scoped to this modifier rather
    than added to .row-hover itself. */

@@ -14,6 +14,7 @@ import type {
   User,
 } from "@shared/types.ts";
 import type { BillInput, ItemCreateInput, ItemUpdateInput, PaymentMethod, SpendGrouping } from "@shared/schemas.ts";
+import type { Unit } from "@shared/units.ts";
 
 /** An API error carrying the server's per-field messages, so forms can show them inline. */
 export class ApiRequestError extends Error {
@@ -119,6 +120,8 @@ export const api = {
   shops: () => request<Shop[]>("/items/shops"),
   itemNames: (q?: string) => request<ItemName[]>(`/items/names${qs({ q })}`),
   itemBills: (itemId: string) => request<ItemPurchase[]>(`/items/${itemId}/bills`),
+  updateItemLines: (itemId: string, edits: { billId: string; lineId: string; quantity: number; unit: Unit }[]) =>
+    request<ItemPurchase[]>(`/items/${itemId}/bills`, { method: "PATCH", body: { edits } }),
 
   bills: (
     params: {

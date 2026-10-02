@@ -100,6 +100,22 @@ export const billInputSchema = z.object({
   lines: z.array(billLineInputSchema).min(1, "A bill needs at least one line"),
 });
 
+/** Bulk-edits quantity/unit for specific lines belonging to one item, across one or more
+ * bills — e.g. fixing a unit that was mis-entered the same way on every receipt. Line
+ * total stays untouched; unit price is re-derived server-side same as `billLineInputSchema`. */
+export const itemLineBulkEditSchema = z.object({
+  edits: z
+    .array(
+      z.object({
+        billId: objectId,
+        lineId: objectId,
+        quantity: z.number().positive("Quantity must be greater than zero").max(1_000_000),
+        unit: z.enum(UNITS),
+      }),
+    )
+    .min(1, "At least one change is required"),
+});
+
 export const billQuerySchema = z.object({
   from: isoDate.optional(),
   to: isoDate.optional(),
@@ -154,3 +170,4 @@ export type ItemCreateInput = z.infer<typeof itemCreateSchema>;
 export type ItemUpdateInput = z.infer<typeof itemUpdateSchema>;
 export type BillLineInput = z.infer<typeof billLineInputSchema>;
 export type BillInput = z.infer<typeof billInputSchema>;
+export type ItemLineBulkEditInput = z.infer<typeof itemLineBulkEditSchema>;

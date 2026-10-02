@@ -99,6 +99,7 @@ export type PricePoint = {
 /** One raw purchase of an item — a plain ledger row, unlike PricePoint's aggregated view. */
 export type ItemPurchase = {
   billId: string;
+  lineId: string;
   billDate: string;
   shop: string;
   paymentMethod: PaymentMethod;

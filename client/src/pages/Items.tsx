@@ -209,6 +209,15 @@ export function Items() {
                             Price history
                           </Link>
                         )}
+                        {item.purchaseCount > 0 && (
+                          <Link
+                            to={`/items/${item.id}/bulk-edit`}
+                            className="link-chip small accent"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            Fix qty/unit
+                          </Link>
+                        )}
                         <button
                           type="button"
                           className="ghost small"

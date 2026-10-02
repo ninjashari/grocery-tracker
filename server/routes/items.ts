@@ -11,8 +11,8 @@ import {
   listItems,
   requireItem,
 } from "../lib/items.ts";
-import { listBillLinesForItem } from "../lib/bills.ts";
-import { itemCreateSchema, itemUpdateSchema } from "../../shared/schemas.ts";
+import { bulkUpdateItemLines, listBillLinesForItem } from "../lib/bills.ts";
+import { itemCreateSchema, itemLineBulkEditSchema, itemUpdateSchema } from "../../shared/schemas.ts";
 
 export const itemsRouter = Router();
 
@@ -97,6 +97,18 @@ itemsRouter.get(
     const id = String(req.params.id);
     await requireItem(householdId, id);
     res.json(await listBillLinesForItem(householdId, id));
+  }),
+);
+
+/** Bulk-fixes quantity/unit on specific lines of this item across one or more bills. */
+itemsRouter.patch(
+  "/:id/bills",
+  asyncHandler(async (req, res) => {
+    const { householdId } = auth(req);
+    const id = String(req.params.id);
+    await requireItem(householdId, id);
+    const input = parseOrThrow(itemLineBulkEditSchema, req.body);
+    res.json(await bulkUpdateItemLines(householdId, id, input.edits));
   }),
 );
 

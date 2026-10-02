@@ -32,7 +32,13 @@ export function ItemBillHistory() {
 
   return (
     <>
-      <PageHead title="Purchase history" subtitle={subtitle ?? "Every bill this item appears on."} />
+      <PageHead title="Purchase history" subtitle={subtitle ?? "Every bill this item appears on."}>
+        {id && purchases.length > 0 && (
+          <Link to={`/items/${id}/bulk-edit`} className="link-chip accent">
+            Fix qty/unit
+          </Link>
+        )}
+      </PageHead>
 
       <ErrorBanner error={error} />
 
