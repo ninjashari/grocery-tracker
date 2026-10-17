@@ -14,6 +14,7 @@ export function Items() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [query, setQuery] = usePersistedState("gt:items-query", "");
   const [includeArchived, setIncludeArchived] = usePersistedState("gt:items-include-archived", false);
+  const [sortRecent, setSortRecent] = usePersistedState("gt:items-sort-recent", false);
 
   const [searchParams, setSearchParams] = usePersistedSearchParams("gt:items-filters");
   const categoryId = searchParams.get("categoryId") ?? "";
@@ -52,6 +53,14 @@ export function Items() {
 
   useEffect(load, [load]);
 
+  const visibleItems = sortRecent
+    ? [...items].sort((a, b) => {
+        if (a.lastPurchasedOn === null) return b.lastPurchasedOn === null ? 0 : 1;
+        if (b.lastPurchasedOn === null) return -1;
+        return b.lastPurchasedOn.localeCompare(a.lastPurchasedOn);
+      })
+    : items;
+
   async function remove(item: Item) {
     const confirmed = window.confirm(
       item.purchaseCount > 0
@@ -79,6 +88,13 @@ export function Items() {
   return (
     <>
       <PageHead title="Items" subtitle="Your grocery catalog. Prices here come from your bills.">
+        <button
+          type="button"
+          className={sortRecent ? "accent" : "ghost"}
+          onClick={() => setSortRecent(!sortRecent)}
+        >
+          Recent items
+        </button>
         <button type="button" className="primary" onClick={() => setEditing("new")}>
           Add item
         </button>
@@ -134,7 +150,7 @@ export function Items() {
         <div className="card-body tight table-wrap">
           {loading ? (
             <Loading />
-          ) : items.length === 0 ? (
+          ) : visibleItems.length === 0 ? (
             <Empty title="No items yet">
               Items are created automatically as you enter bills, or{" "}
               <button type="button" className="ghost small" onClick={() => setEditing("new")}>
@@ -155,7 +171,7 @@ export function Items() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {visibleItems.map((item) => (
                   <tr
                     key={item.id}
                     style={item.archived ? { opacity: 0.6 } : undefined}
